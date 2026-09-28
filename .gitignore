@@ -1,0 +1,25 @@
+# Local environments and credentials
+.venv/
+venv/
+.env
+.env.*
+!.env.example
+.streamlit/secrets.toml
+llm-settings.json
+*.pem
+*.key
+
+# Runtime stores include documents, API settings, vectors, and model caches
+data/
+work/
+*.log
+
+# Python and editor caches
+__pycache__/
+.pytest_cache/
+*.py[cod]
+.coverage
+htmlcov/
+.DS_Store
+.idea/
+.vscode/

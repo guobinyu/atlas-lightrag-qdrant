@@ -1,0 +1,13 @@
+lightrag-hku==1.5.7
+qdrant-client==1.19.1
+streamlit==1.64.0
+plotly==7.1.0
+scikit-learn==1.9.1
+fastembed==0.8.0
+httpx==0.28.1
+python-dotenv==1.2.3
+numpy==2.5.3
+pytest==9.1.1
+ddgs==9.16.0
+trafilatura==2.2.0
+pypdf==6.19.0
