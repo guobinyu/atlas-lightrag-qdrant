@@ -118,3 +118,29 @@ def test_subgraph_can_find_nodes_outside_default_limit():
     shown, relations = subgraph(nodes, edges, focus="n199", depth=1, limit=160)
     assert {n["id"] for n in shown} == {"n199", "n198"}
     assert len(relations) == 1
+
+
+def test_independent_semantic_job_preserves_lightrag_state(built_workspace):
+    from lab.ontology.profile import uri
+    engine, source, _ = built_workspace
+    work=engine.workbench
+    before=work.sources.get(source['id'])
+    original=work.llm._request
+    async def response(cfg,messages):
+        return json.dumps({'entities':[{'id':'d','label':'测试文献','type':'E31'},{'id':'t','label':'Saga','type':'E55'}],
+                           'statements':[{'subject':'d','predicate':str(uri('P70')),'object':'t','quote':source['text'],'start':0}], 'deferred':[]}),{}
+    work.llm._request=response
+    try:
+        engine.gate.acquire()
+        try:
+            with pytest.raises(ValueError,match='已有'): work.semantic.start_extraction([source['id']])
+            assert not work.semantic.batches()
+        finally: engine.gate.release()
+        result=work.semantic.start_extraction([source['id']])[0].result(timeout=30)
+        assert result['status']=='success'
+        assert work.sources.get(source['id'])==before
+        values=work.semantic.list_candidates()
+        assert len(values)==1 and values[0]['validation']['valid']
+        assert not work.semantic.get_published_graph()['statements']
+    finally:
+        work.llm._request=original

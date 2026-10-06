@@ -196,3 +196,9 @@ tests/                  契约、投影、真实集成测试
 - <https://github.com/HKUDS/LightRAG/blob/v1.5.7/lightrag/kg/qdrant_impl.py>
 - <https://github.com/qdrant/qdrant-client>
 - <https://qdrant.tech/documentation/web-ui/>
+
+## 标准语义图谱（CIDOC CRM）
+
+资料工作台新增独立的“构建标准语义图谱”，支持丝绸、茶、黄酒领域。候选经证据定位、类型和 SHACL 校验后，仍须本机人工批准才能进入正式图谱。支持有向关系、审核/撤回记录及 Turtle、JSON-LD、JSON 审计导出。原 LightRAG 构建和检索继续保留。
+
+已有环境请先执行 `.venv/bin/python -m pip install -r requirements.lock.txt` 后重启。使用方式、约束、数据位置和测试方法见 [标准语义图谱指南](docs/semantic-graph.md)。

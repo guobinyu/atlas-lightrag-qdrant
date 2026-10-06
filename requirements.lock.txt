@@ -32,6 +32,7 @@ h11==0.16.0
 h2==4.4.1
 hf-xet==1.6.0
 hpack==4.2.0
+html5rdf==1.2.1
 htmldate==1.10.0
 httpcore==1.0.9
 httptools==0.8.0
@@ -60,6 +61,7 @@ networkx==3.6.1
 numpy==2.5.3
 onnxruntime==1.30.0
 opentelemetry-api==1.44.0
+owlrl==7.1.4
 packaging==26.3
 pandas==3.0.6
 pillow==12.3.0
@@ -67,6 +69,7 @@ pipmaster==1.1.13
 plotly==7.1.0
 pluggy==1.6.0
 portalocker==3.2.0
+prettytable==3.18.0
 primp==2.0.1
 propcache==0.5.4
 proto-plus==1.28.4
@@ -80,8 +83,10 @@ pydantic==2.13.5
 pydantic_core==2.46.5
 pydeck==0.9.3
 Pygments==2.21.0
+pyparsing==3.3.3
 pypdf==6.19.0
 pypinyin==0.55.0
+pyshacl==0.30.1
 pytest==9.1.1
 python-dateutil==2.9.0.post0
 python-dotenv==1.2.3
@@ -89,6 +94,7 @@ python-multipart==0.0.32
 pytz==2026.3.post1
 PyYAML==6.0.3
 qdrant-client==1.19.1
+rdflib==7.1.4
 referencing==0.37.0
 regex==2026.9.10
 requests==2.34.2

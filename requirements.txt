@@ -11,3 +11,6 @@ pytest==9.1.1
 ddgs==9.16.0
 trafilatura==2.2.0
 pypdf==6.19.0
+
+rdflib==7.1.4
+pyshacl==0.30.1

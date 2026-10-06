@@ -52,6 +52,8 @@ class Workspace:
         self.job_dir.mkdir(exist_ok=True)
         self.active = None
         self.llm = ExtractionLLM(self.directory / "llm-settings.json", self.emit)
+        from lab.ontology.service import SemanticService
+        self.semantic = SemanticService(self.directory / "ontology", self)
         self.cached_snapshot = None
         # Never automatically resubmit a write that was interrupted by restart.
         for path in self.job_dir.glob("*.json"):
@@ -71,6 +73,8 @@ class Workspace:
 
     def start(self, kind, inputs):
         self.engine.ready.result()
+        if kind in {"semantic", "semantic_retry"}:
+            return self._start_semantic(kind, inputs)
         if kind not in {"collect", "build", "retry"}:
             raise ValueError("未知工作类型。")
         if kind != "retry" and not 1 <= len(inputs) <= 10:
@@ -114,6 +118,43 @@ class Workspace:
             future = asyncio.run_coroutine_threadsafe(run(), self.engine.loop)
             return future, job
         except Exception:
+            self.engine.gate.release()
+            raise
+
+    def _start_semantic(self, kind, inputs):
+        self.llm.settings.validate()
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError("已有检索或构建在执行，请等待完成。")
+        try:
+            model = self.llm.settings.public()
+            if kind == "semantic":
+                ids = inputs["source_ids"]
+                sources = [self.sources.get(identifier) for identifier in ids]
+                batch_id = self.semantic.create_batch(sources, model, inputs["domain"])
+            else:
+                batch_id = inputs["batch_id"]
+                batch = next((b for b in self.semantic.batches() if b["id"] == batch_id), None)
+                if not batch:
+                    raise ValueError("未知语义抽取批次")
+                ids = [s["id"] for s in batch["sources"]]
+                self.semantic.prepare_retry(batch_id, [self.sources.get(i) for i in ids], model)
+            job = Job(self.job_dir, kind, ids)
+            job.update(batch_id=batch_id, model=model)
+            self.active = job
+            async def run():
+                try:
+                    state = await self.semantic.run(batch_id, self.llm, job.emit)
+                    job.update(status=state, message="抽取结束；候选须通过校验并经人工审核后才能发布。")
+                except Exception as exc:
+                    job.update(status="failed", message=type(exc).__name__ + "：语义任务失败，详情请查看校验报告。")
+                finally:
+                    job.update(finished_at=utc_now())
+                    self.active = None
+                    self.engine.gate.release()
+                return job.snapshot()
+            return asyncio.run_coroutine_threadsafe(run(), self.engine.loop), job
+        except Exception:
+            self.active = None
             self.engine.gate.release()
             raise
 
