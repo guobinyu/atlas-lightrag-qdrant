@@ -13,6 +13,7 @@ STATUS = {"collected": "待构建", "pending": "等待处理", "indexing": "构�
 EVENTS = {"job.started": "任务开始", "source.fetching": "读取网页正文", "source.collected": "资料已保存", "source.failed": "资料读取失败", "document.started": "文档切块与抽取", "llm.started": "调用抽取模型", "llm.completed": "模型返回", "llm.failed": "模型调用失败", "document.completed": "图谱与向量已写入", "document.failed": "文档构建失败", "indexes.refreshing": "读取最新索引", "build.completed": "构建完成", "collection.completed": "采集完成", "job.failed": "任务失败"}
 EVENTS.update({"embedding.started": "向量化开始", "embedding.completed": "向量化完成", "vectors.written": "Qdrant 写入完成"})
 EVENTS.update({"semantic.chunk.started": "语义文本块开始抽取", "semantic.chunk.completed": "语义候选已保存", "semantic.chunk.failed": "语义文本块失败"})
+EVENTS.update({"semantic.verification.started": "模型证据检查", "semantic.verification.completed": "证据检查完成", "semantic.batch.created": "语义批次已创建"})
 EVENTS.update({"retry.started": "重试工作区未完成文档", "retry.completed": "重试完成"})
 
 
@@ -66,7 +67,21 @@ def job_panel(engine):
         if status == "running":
             st.info("任务在后台执行，可以切换页面。请勿关闭服务进程；同一工作区同时只执行一个任务。")
         if job.get("message"):
+            if job['kind'].startswith('semantic') and job.get('publication_policy') != 'automatic-evidence-v2':
+                st.caption('以下为历史任务在当时版本保存的说明；当前新任务采用模型证据检查后自动发布。')
             st.warning(job["message"])
+        if job.get('semantic_result'):
+            result = job['semantic_result']
+            if result.get('requested') is not None:
+                st.write(f"目标 {result['requested']} 份 · 已读取 {result['collected']} 份")
+                if result['collected'] < result['requested']:
+                    st.warning('可读取资料不足目标数量，未用重复资料补足。可调整主题重试。')
+            st.write(f"抽取 {result['extracted']} 条 · 已发布 {result['published']} 条 · 未发布 {result['blocked']} 条 · 失败块 {result['failed_blocks']}")
+            if result.get('batch_id'):
+                st.link_button('查看本次标准语义图谱', '/?view=semantic&batch=' + result['batch_id'])
+            if result.get('failures'):
+                with st.expander('搜索和正文读取失败记录'):
+                    st.json(result['failures'])
         if job.get("result"):
             result = job["result"]
             st.success(f"当前知识库：{result['entities']} 个实体 · {result['relations']} 条关系 · {sum(result['vectors'].values())} 个向量")
@@ -104,7 +119,20 @@ def start_job(engine, kind, inputs):
 def collect_page(engine):
     work = engine.workbench
     header("从一个主题，构建你的知识库", "查找可信资料，预览正文，生成可探索的知识图谱与向量空间。")
-    st.markdown('<div class="workflow-strip"><span>01　搜集资料</span><i>→</i><span>02　预览与选择</span><i>→</i><span>03　LightRAG 构建</span><i>→</i><span>04　图谱与向量</span></div>', unsafe_allow_html=True)
+    st.markdown('<div class="workflow-strip"><span>01　输入主题</span><i>→</i><span>02　自动搜集正文</span><i>→</i><span>03　本体抽取与证据检查</span><i>→</i><span>04　自动发布图谱</span></div>', unsafe_allow_html=True)
+    from lab.ontology.profile import DOMAINS
+    with st.container(border=True):
+        st.markdown('**自动构建本体图谱**')
+        with st.form('semantic-auto'):
+            auto_topic = st.text_input('研究主题', '宋朝文化', max_chars=300, key='auto-topic')
+            a, b = st.columns(2)
+            auto_limit = a.number_input('希望读取的资料数量', 1, 10, 3)
+            auto_domain = b.selectbox('本体领域', ['culture', 'silk', 'tea', 'wine'], format_func=lambda k: DOMAINS[k]['label'])
+            automatic = st.form_submit_button('一键搜集并构建本体图谱', type='primary', disabled=bool(work.active) or not work.llm.configured)
+        st.caption(f"模型：{work.llm.settings.model or '未配置'} · CIDOC CRM 7.1.3。正文将发送至已配置服务；本体校验和模型证据检查均通过后自动发布，无需人工审核。")
+        st.caption('默认 3 份，最多 10 份；每份使用前 9,000 字符。资料相关性主要由检索词决定，尚无独立相关性评分。')
+        if automatic:
+            start_job(engine, 'semantic_auto', {'topic': auto_topic, 'limit': int(auto_limit), 'domain': auto_domain})
     if not work.llm.configured:
         st.info("资料搜索和预览已可用。生成图谱前，请在「模型设置」连接用于实体关系抽取的 LLM；当前向量模型已经可用。")
     tab_search, tab_url, tab_upload = st.tabs(["搜索公开资料", "添加网页链接", "上传 / 粘贴资料"])
@@ -190,12 +218,11 @@ def collect_page(engine):
     st.caption("构建会将所选正文发送至模型设置中的抽取服务，生成实体、关系与三类向量。使用本机 Ollama 时抽取在本机执行。")
     if st.button(f"用 LightRAG 构建所选资料（{len(selected)}）", type="primary", width="stretch", disabled=not selected or bool(work.active) or not work.llm.configured):
         start_job(engine, "build", selected)
-    from lab.ontology.profile import TERMS
-    domain = st.selectbox("标准语义图谱领域", list(TERMS), format_func=lambda k: TERMS[k]["label"])
-    st.caption(f"语义抽取模型：{work.llm.settings.model or '未配置'}。正文将发送到已配置服务；抽取只生成待审核候选，不自动发布。")
+    domain = st.selectbox("标准语义图谱领域", ['culture', 'silk', 'tea', 'wine'], format_func=lambda k: DOMAINS[k]["label"])
+    st.caption(f"语义抽取模型：{work.llm.settings.model or '未配置'}。正文将发送到已配置服务；本体校验和模型证据检查均通过后自动发布，无需人工审核。")
     if st.button(f"构建标准语义图谱（{len(selected)}）", width="stretch", disabled=not selected or bool(work.active) or not work.llm.configured):
         start_job(engine, "semantic", {"source_ids": selected, "domain": domain})
-    st.link_button("前往标准语义图谱审核", "/?view=semantic")
+    st.link_button("查看标准语义图谱", "/?view=semantic")
     if any(s["status"] in {"failed", "interrupted", "processing", "indexing", "pending"} for s in sources):
         with st.expander("失败与中断恢复"):
             st.caption("LightRAG 的原生重试作用于当前工作区的所有失败、等待和中断文档，每份失败文档重试一次。请先修复模型设置，再执行。")

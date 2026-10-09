@@ -8,6 +8,7 @@ import json
 import stat
 
 import pytest
+from evidence_helpers import verification_reply
 
 from lab.config import ROOT, Settings
 from lab.engine import Engine
@@ -127,6 +128,9 @@ def test_independent_semantic_job_preserves_lightrag_state(built_workspace):
     before=work.sources.get(source['id'])
     original=work.llm._request
     async def response(cfg,messages):
+        verification = verification_reply(messages)
+        if verification is not None:
+            return verification, {}
         return json.dumps({'entities':[{'id':'d','label':'测试文献','type':'E31'},{'id':'t','label':'Saga','type':'E55'}],
                            'statements':[{'subject':'d','predicate':str(uri('P70')),'object':'t','quote':source['text'],'start':0}], 'deferred':[]}),{}
     work.llm._request=response
@@ -141,6 +145,53 @@ def test_independent_semantic_job_preserves_lightrag_state(built_workspace):
         assert work.sources.get(source['id'])==before
         values=work.semantic.list_candidates()
         assert len(values)==1 and values[0]['validation']['valid']
-        assert not work.semantic.get_published_graph()['statements']
+        assert len(work.semantic.get_published_graph()['statements']) == 1
+        assert values[0]['reviews'][0]['action'] == 'auto_publish'
     finally:
         work.llm._request=original
+
+
+def test_main_app_automatic_workflow_and_batch_graph(built_workspace, monkeypatch):
+    import time
+    from streamlit.testing.v1 import AppTest
+    from test_demo import fixed_tools
+    import lab.engine
+    engine, _, _ = built_workspace
+    fixed_tools(monkeypatch)
+    # Remove the native-ingestion fixture's instance override for this test only.
+    monkeypatch.delattr(engine.workbench.llm, '_request')
+    monkeypatch.setattr(lab.engine, 'Engine', lambda settings: engine)
+    work = engine.workbench
+    before = len(work.jobs())
+    engine.gate.acquire()
+    try:
+        with pytest.raises(ValueError, match='已有'):
+            work.start('semantic_auto', {'topic': '宋朝文化', 'limit': 3, 'domain': 'culture'})
+        assert len(work.jobs()) == before
+    finally:
+        engine.gate.release()
+    app = AppTest.from_file(str(ROOT / 'app.py')).run(timeout=60)
+    assert not app.exception
+    assert app.text_input(key='auto-topic').value == '宋朝文化'
+    next(b for b in app.button if b.label == '一键搜集并构建本体图谱').click().run(timeout=60)
+    assert not app.exception
+    # Inspect another main-project page while the background task finishes.
+    app.query_params['view'] = 'semantic'
+    app.run(timeout=60)
+    assert not app.exception
+    deadline = time.monotonic() + 30
+    while work.active and time.monotonic() < deadline:
+        time.sleep(.02)
+    assert work.active is None
+    job = work.jobs()[0]
+    assert job['kind'] == 'semantic_auto'
+    assert job['semantic_result']['collected'] == 1
+    assert job['semantic_result']['published'] == 1
+    batch = job['batch_id']
+    app.query_params['batch'] = batch
+    app.run(timeout=60)
+    assert not app.exception
+    assert next(s for s in app.selectbox if s.label == '抽取批次').value == batch
+    assert len(app.get('plotly_chart')) == 1
+    assert len(app.get('download_button')) >= 3
+    assert 'urn:atlas:project:' in work.semantic.export('turtle')

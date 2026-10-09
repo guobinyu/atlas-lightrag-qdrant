@@ -54,13 +54,16 @@ class Workspace:
         self.llm = ExtractionLLM(self.directory / "llm-settings.json", self.emit)
         from lab.ontology.service import SemanticService
         self.semantic = SemanticService(self.directory / "ontology", self)
+        self.semantic.auto_publish()
         self.cached_snapshot = None
         # Never automatically resubmit a write that was interrupted by restart.
         for path in self.job_dir.glob("*.json"):
             value = json.loads(path.read_text(encoding="utf-8"))
             if value["status"] == "running":
                 value["status"] = "interrupted"
-                value["message"] = "进程已中断。请刷新资料状态，确认 LightRAG 的实际文档状态后再重试。"
+                value["message"] = ("进程已中断。已采集资料和成功文本块保留；在校验报告中重试失败或中断块。尚未创建批次时请重新启动任务。"
+                                    if value['kind'].startswith('semantic') else
+                                    "进程已中断。请刷新资料状态，确认 LightRAG 的实际文档状态后再重试。")
                 path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def emit(self, event, data):
@@ -73,7 +76,7 @@ class Workspace:
 
     def start(self, kind, inputs):
         self.engine.ready.result()
-        if kind in {"semantic", "semantic_retry"}:
+        if kind in {"semantic", "semantic_retry", "semantic_auto"}:
             return self._start_semantic(kind, inputs)
         if kind not in {"collect", "build", "retry"}:
             raise ValueError("未知工作类型。")
@@ -123,11 +126,20 @@ class Workspace:
 
     def _start_semantic(self, kind, inputs):
         self.llm.settings.validate()
+        if kind == 'semantic_auto':
+            from lab.ontology.profile import DOMAINS
+            if (not isinstance(inputs.get('topic'), str) or not 2 <= len(inputs['topic'].strip()) <= 300
+                    or type(inputs.get('limit')) is not int or not 1 <= inputs['limit'] <= 10
+                    or inputs.get('domain', 'culture') not in DOMAINS):
+                raise ValueError('请输入 2–300 字符的主题，数量为 1–10，并选择有效领域。')
         if not self.engine.gate.acquire(blocking=False):
             raise ValueError("已有检索或构建在执行，请等待完成。")
         try:
             model = self.llm.settings.public()
-            if kind == "semantic":
+            if kind == 'semantic_auto':
+                ids = []
+                batch_id = None
+            elif kind == "semantic":
                 ids = inputs["source_ids"]
                 sources = [self.sources.get(identifier) for identifier in ids]
                 batch_id = self.semantic.create_batch(sources, model, inputs["domain"])
@@ -139,12 +151,31 @@ class Workspace:
                 ids = [s["id"] for s in batch["sources"]]
                 self.semantic.prepare_retry(batch_id, [self.sources.get(i) for i in ids], model)
             job = Job(self.job_dir, kind, ids)
-            job.update(batch_id=batch_id, model=model)
+            job.update(batch_id=batch_id, model=model, publication_policy='automatic-evidence-v2')
+            if kind == 'semantic_auto':
+                job.update(topic=inputs['topic'].strip(), requested=inputs['limit'], domain=inputs.get('domain', 'culture'))
             self.active = job
             async def run():
                 try:
-                    state = await self.semantic.run(batch_id, self.llm, job.emit)
-                    job.update(status=state, message="抽取结束；候选须通过校验并经人工审核后才能发布。")
+                    if kind == 'semantic_auto':
+                        from lab.demo import build_demo
+                        def progress(event, data):
+                            job.emit(event, data)
+                            if event == 'semantic.batch.created':
+                                job.update(**data)
+                            elif event == '资料已保存':
+                                job.update(collected=data['count'])
+                        result = await build_demo(inputs['topic'], inputs['limit'], self.llm, self.sources,
+                                                  self.semantic, progress, inputs.get('domain', 'culture'), job.value['id'])
+                        job.update(status=result['status'], semantic_result=result, batch_id=result['batch_id'], source_ids=result['source_ids'])
+                    else:
+                        state = await self.semantic.run(batch_id, self.llm, job.emit)
+                        claims = self.semantic.list_candidates(batch_id=batch_id)
+                        job.update(status=state, semantic_result={'batch_id': batch_id, 'collected': len(ids),
+                            'extracted': len(claims), 'published': sum(c['status'] == 'published' for c in claims),
+                            'blocked': sum(c['status'] == 'pending' for c in claims),
+                            'failed_blocks': sum(b['status'] == 'failed' for b in self.semantic.report(batch_id))})
+                    job.update(message="任务结束；本体校验和模型证据检查均通过的陈述已自动发布。数量缺口和未发布原因请查看结果。")
                 except Exception as exc:
                     job.update(status="failed", message=type(exc).__name__ + "：语义任务失败，详情请查看校验报告。")
                 finally:
