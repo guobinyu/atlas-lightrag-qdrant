@@ -59,4 +59,63 @@ button[kind="secondary"] { border-radius:9px; border-color:#e0e9e9; background:#
 .footer { font-size:10px; color:#98aaae; text-align:center; padding:24px 0 5px; letter-spacing:.4px; }
 @media(max-width:1050px) { .stMainBlockContainer { padding:4rem 1.2rem 2rem; } .timeline { gap:6px; } .phase { padding:12px 8px; gap:6px; } .phase small { font-size:9px; } }
 @media(max-width:700px) { .timeline { grid-template-columns:repeat(2,1fr); } h1 { font-size:28px!important; } .eyebrow span { display:block; margin:7px 0 0; } .st-key-query-panel,.st-key-plot-panel,.st-key-results-panel { padding:16px; } }
+/* A quiet archive workspace: warm paper, restrained teal, clear primary actions. */
+:root { --ink:#203f42; --muted:#788b88; --teal:#12786e; --paper:#f6f5f0; --line:#e1e7e1; }
+.stApp { background:var(--paper); }
+header[data-testid="stHeader"] { background:rgba(246,245,240,.94); }
+.stMainBlockContainer { max-width:1420px; padding-top:3.4rem; }
+[data-testid="stSidebar"] { background:#edf1eb; border-right:1px solid #dce4dc; }
+.brand { margin-bottom:28px; letter-spacing:-.8px; }
+.brand-icon { background:#1f5d54; border-radius:14px; box-shadow:0 5px 15px #1f5d5414; }
+.st-key-workspace_page label { padding:12px 13px; margin-bottom:5px; border-radius:10px; }
+.st-key-workspace_page label:has(input:checked) { background:#fff; color:#126b60; box-shadow:0 2px 8px #23493c08; }
+.eyebrow { letter-spacing:2.6px; font-size:10px; color:#69816f; }
+.eyebrow span { color:#98a399; }
+h1 { font-size:clamp(28px,3vw,40px)!important; font-weight:650!important; letter-spacing:-1.5px!important; }
+.subtitle { font-size:15px; line-height:1.8; color:#72827c; max-width:780px; margin-bottom:25px; }
+.workspace-flow { display:grid; grid-template-columns:repeat(4,1fr); gap:12px; margin:8px 0 26px; }
+.workspace-step { display:flex; align-items:center; gap:12px; padding:13px 15px; border:1px solid #dfe6dc; border-radius:12px; background:#fbfcf8; }
+.workspace-step b { color:#698c78; font-size:11px; letter-spacing:1px; }
+.workspace-step strong { display:block; font-size:13px; font-weight:600; color:#34564a; }
+.workspace-step small { display:block; color:#86978c; font-size:10px; margin-top:4px; }
+.section-eyebrow { color:#8d9b89; letter-spacing:1.7px; font-size:10px; margin:0 0 6px; }
+.section-title { font-size:21px; font-weight:650; letter-spacing:-.4px; color:#234940; margin:0 0 6px; }
+.section-copy { font-size:13px; color:#7a8e82; line-height:1.7; margin:0 0 16px; }
+.st-key-auto-build-panel { background:#fff; border:1px solid #dfe6dc; border-radius:18px; padding:26px 28px 19px; box-shadow:0 6px 24px #2b4e3a05; }
+.st-key-auto-build-panel [data-testid="stForm"] { border:0; padding:0; }
+.st-key-auto-build-panel [data-testid="stTextInput"] input { font-size:20px; min-height:58px; background:#f8faf6; }
+.st-key-auto-build-panel button[kind="primary"] { min-height:48px; width:100%; border-radius:11px; }
+.connection-pill { display:inline-flex; align-items:center; gap:8px; background:#f0f6ed; color:#496b4b; padding:7px 11px; border-radius:20px; font-size:11px; margin:10px 0 4px; }
+.connection-pill i { width:6px; height:6px; background:#458a63; border-radius:50%; }
+.connection-pill.offline { background:#fbf2df; color:#977b3d; }
+.connection-pill.offline i { background:#b39652; }
+.st-key-task-panel { background:#fff; border:1px solid #dfe6dc; border-radius:16px; padding:19px 22px; margin:6px 0 12px; }
+.task-top { display:flex; align-items:center; justify-content:space-between; gap:12px; margin-bottom:9px; }
+.task-top strong { color:#305645; font-size:15px; }
+.task-badge { padding:5px 10px; border-radius:20px; background:#eff4ed; color:#4c6c4b; font-size:11px; white-space:nowrap; }
+.task-badge.running { background:#e5f3f0; color:#0b7d71; }
+.task-badge.failed,.task-badge.interrupted { background:#f8ece7; color:#a9634e; }
+.task-badge.partial { background:#fbf3df; color:#987b36; }
+.task-stages { display:flex; gap:10px; margin:15px 0; }
+.task-stage { flex:1; padding:9px 12px; background:#f7f8f4; border-radius:9px; color:#93a18e; font-size:11px; border:1px solid transparent; }
+.task-stage.done { color:#567a50; background:#f0f6ed; }
+.task-stage.active { color:#12786e; background:#edf8f4; border-color:#9bc5b1; }
+.st-key-batch-panel { padding:20px 23px 13px; border:1px solid #e0e6dc; border-radius:16px; background:#fff; margin-bottom:5px; }
+.st-key-graph-canvas,.st-key-claim-inspector { background:#fff; border:1px solid #e0e6dc; border-radius:16px; padding:17px 20px; }
+.st-key-claim-inspector [data-testid="stText"] { font-size:13px; line-height:1.8; color:#4b655d; }
+.st-key-claim-inspector [data-testid="stCaptionContainer"] { overflow-wrap:anywhere; }
+.st-key-semantic-tabs [data-baseweb="tab-list"] { gap:20px; border-bottom:1px solid #dce4d9; margin-top:8px; margin-bottom:18px; }
+[data-testid="stMetric"] { padding:15px 19px; border-radius:14px; border-color:#e0e6dc; box-shadow:none; }
+[data-testid="stMetricLabel"] { font-size:12px; color:#7d8d7c; }
+[data-testid="stMetricValue"] { font-size:29px; font-weight:550; color:#375e46; }
+button[kind="primary"],button[data-testid="stBaseButton-primaryFormSubmit"] { background:#16786b; border-color:#16786b; }
+button[kind="primary"]:hover { background:#105f55; border-color:#105f55; }
+button[kind="secondary"] { border-color:#dce5da; border-radius:10px; color:#3f5b48; }
+[data-testid="stExpander"] { border-color:#e0e6dc; border-radius:12px; background:#ffffff80; }
+[data-testid="stCaptionContainer"] { font-size:12px; line-height:1.65; color:#6e7d71; }
+[data-testid="stTextInput"] input { background:#fafbf8; }
+[data-testid="stTabs"] button p { font-size:14px; }
+.footer { color:#98a28e; padding-top:30px; letter-spacing:1.1px; }
+@media(max-width:900px) { .workspace-flow { grid-template-columns:repeat(2,1fr); gap:8px; } .st-key-auto-build-panel { padding:21px; } }
+@media(max-width:700px) { .stMainBlockContainer { padding:3.4rem 1rem 1.5rem; } .workspace-step { padding:10px; gap:8px; } .workspace-step small { display:none; } .st-key-task-panel,.st-key-batch-panel,.st-key-graph-canvas,.st-key-claim-inspector { padding:15px; } .task-stages { gap:5px; } .task-stage { padding:8px; } }
 </style>

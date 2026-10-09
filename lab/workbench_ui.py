@@ -1,5 +1,7 @@
 from html import escape
 import json
+from datetime import datetime
+from zoneinfo import ZoneInfo
 
 import streamlit as st
 
@@ -35,7 +37,11 @@ def navigation():
 
 
 def header(title, subtitle, tag="ATLAS / KNOWLEDGE WORKSPACE"):
-    st.markdown(f'<div class="eyebrow">{tag}<span>LIGHTRAG × QDRANT</span></div><h1>{title}</h1><p class="subtitle">{subtitle}</p>', unsafe_allow_html=True)
+    st.markdown(f'<div class="eyebrow">{tag}<span>资料 · 关系 · 证据</span></div><h1>{title}</h1><p class="subtitle">{subtitle}</p>', unsafe_allow_html=True)
+
+
+def section_heading(kicker, title, copy=''):
+    st.markdown(f'<div class="section-eyebrow">{escape(kicker)}</div><div class="section-title">{escape(title)}</div><div class="section-copy">{escape(copy)}</div>', unsafe_allow_html=True)
 
 
 def show_links():
@@ -59,24 +65,44 @@ def job_panel(engine):
     if previous == (job["id"], True) and not busy:
         # Rebuild source checkboxes and action states once when the worker ends.
         st.rerun()
-    with st.container(border=True):
-        st.markdown("**当前执行**" if status == "running" else "**最近执行**")
+    with st.container(key='task-panel'):
+        status_label = {"running": "正在执行", "success": "已完成", "partial": "部分完成", "failed": "执行失败", "interrupted": "进程中断"}.get(status, status)
+        st.markdown(f'<div class="task-top"><strong>{"当前执行" if status == "running" else "最近执行"}</strong><span class="task-badge {escape(status)}">{escape(status_label)}</span></div>', unsafe_allow_html=True)
         a, b = st.columns([3, 1])
-        a.caption(f"{('标准语义抽取' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · #{job['id'][:8]} · {job['created_at'][:19].replace('T', ' ')} UTC")
-        b.caption({"running": "● 正在执行", "success": "✓ 已完成", "partial": "部分完成", "failed": "执行失败", "interrupted": "进程中断"}.get(status, status))
+        created = datetime.fromisoformat(job['created_at']).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M')
+        a.caption(f"{('本体图谱构建' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
+        b.caption(job.get('topic', ''))
+        if job['kind'].startswith('semantic'):
+            phase = 1 if job.get('batch_id') else 0
+            if status != 'running':
+                phase = 2
+            stages = []
+            for index, label in enumerate(['搜集资料', '抽取与校验', '查看图谱']):
+                state = 'done' if index < phase else 'active' if status == 'running' and index == phase else ''
+                if index == 2 and job.get('semantic_result', {}).get('published', 0):
+                    state = 'done'
+                if status in {'failed', 'interrupted'}:
+                    state = ''
+                stages.append(f'<div class="task-stage {state}">{index + 1:02d}　{label}</div>')
+            st.markdown('<div class="task-stages">' + ''.join(stages) + '</div>', unsafe_allow_html=True)
         if status == "running":
             st.info("任务在后台执行，可以切换页面。请勿关闭服务进程；同一工作区同时只执行一个任务。")
         if job.get("message"):
             if job['kind'].startswith('semantic') and job.get('publication_policy') != 'automatic-evidence-v2':
                 st.caption('以下为历史任务在当时版本保存的说明；当前新任务采用模型证据检查后自动发布。')
-            st.warning(job["message"])
+            if status == 'success':
+                st.caption(job['message'])
+            else:
+                st.warning(job["message"])
         if job.get('semantic_result'):
             result = job['semantic_result']
             if result.get('requested') is not None:
                 st.write(f"目标 {result['requested']} 份 · 已读取 {result['collected']} 份")
                 if result['collected'] < result['requested']:
                     st.warning('可读取资料不足目标数量，未用重复资料补足。可调整主题重试。')
-            st.write(f"抽取 {result['extracted']} 条 · 已发布 {result['published']} 条 · 未发布 {result['blocked']} 条 · 失败块 {result['failed_blocks']}")
+            metrics = st.columns(4)
+            for col, name, value in zip(metrics, ['抽取陈述', '已发布', '未发布', '失败文本块'], [result['extracted'], result['published'], result['blocked'], result['failed_blocks']]):
+                col.metric(name, value)
             if result.get('batch_id'):
                 st.link_button('查看本次标准语义图谱', '/?view=semantic&batch=' + result['batch_id'])
             if result.get('failures'):
@@ -118,84 +144,89 @@ def start_job(engine, kind, inputs):
 
 def collect_page(engine):
     work = engine.workbench
-    header("从一个主题，构建你的知识库", "查找可信资料，预览正文，生成可探索的知识图谱与向量空间。")
-    st.markdown('<div class="workflow-strip"><span>01　输入主题</span><i>→</i><span>02　自动搜集正文</span><i>→</i><span>03　本体抽取与证据检查</span><i>→</i><span>04　自动发布图谱</span></div>', unsafe_allow_html=True)
+    header("让文化知识，连成图谱", "从一个研究主题出发，搜集资料、提取有据可查的知识，在图谱中探索它们的联系。")
+    steps = [('01', '确定主题', '选一个想了解的文化方向'), ('02', '搜集资料', '读取网页，保留原始来源'), ('03', '抽取与校验', '按本体建模，检查原文依据'), ('04', '探索图谱', '自动发布，查看关系与证据')]
+    st.markdown('<div class="workspace-flow">' + ''.join(f'<div class="workspace-step"><b>{n}</b><div><strong>{name}</strong><small>{note}</small></div></div>' for n, name, note in steps) + '</div>', unsafe_allow_html=True)
     from lab.ontology.profile import DOMAINS
-    with st.container(border=True):
-        st.markdown('**自动构建本体图谱**')
-        with st.form('semantic-auto'):
+    with st.container(key='auto-build-panel'):
+        section_heading('START A COLLECTION', '你想探索什么？', '输入主题，其余步骤交给工作台。建议从 3 份资料开始。')
+        with st.form('semantic-auto', border=False):
             auto_topic = st.text_input('研究主题', '宋朝文化', max_chars=300, key='auto-topic')
             a, b = st.columns(2)
             auto_limit = a.number_input('希望读取的资料数量', 1, 10, 3)
             auto_domain = b.selectbox('本体领域', ['culture', 'silk', 'tea', 'wine'], format_func=lambda k: DOMAINS[k]['label'])
-            automatic = st.form_submit_button('一键搜集并构建本体图谱', type='primary', disabled=bool(work.active) or not work.llm.configured)
-        st.caption(f"模型：{work.llm.settings.model or '未配置'} · CIDOC CRM 7.1.3。正文将发送至已配置服务；本体校验和模型证据检查均通过后自动发布，无需人工审核。")
-        st.caption('默认 3 份，最多 10 份；每份使用前 9,000 字符。资料相关性主要由检索词决定，尚无独立相关性评分。')
+            automatic = st.form_submit_button('一键搜集并构建本体图谱', type='primary', width='stretch', disabled=bool(work.active) or not work.llm.configured)
+        st.markdown(f'<div class="connection-pill {"" if work.llm.configured else "offline"}"><i></i>{escape(work.llm.settings.model or "请先连接模型")} · CIDOC CRM 7.1.3</div>', unsafe_allow_html=True)
+        st.caption('正文将发送至已配置模型。本体校验与证据检查通过后自动发布，无需人工审核。')
+        with st.expander('了解资料与抽取范围'):
+            st.caption('最多 10 份资料，每份使用前 9,000 字符。资料相关性主要由检索词决定，尚无独立相关性评分。')
         if automatic:
             start_job(engine, 'semantic_auto', {'topic': auto_topic, 'limit': int(auto_limit), 'domain': auto_domain})
+    job_panel(engine)
     if not work.llm.configured:
         st.info("资料搜索和预览已可用。生成图谱前，请在「模型设置」连接用于实体关系抽取的 LLM；当前向量模型已经可用。")
-    tab_search, tab_url, tab_upload = st.tabs(["搜索公开资料", "添加网页链接", "上传 / 粘贴资料"])
-    with tab_search:
-        with st.form("research-search"):
-            topic = st.text_input("研究主题", placeholder="例如：缂丝工艺、传统织锦与丝绸之路文化交流", value="丝绸文化 缂丝 云锦 传统织造技艺")
-            left, right = st.columns([3, 1], vertical_alignment="bottom")
-            limit = left.select_slider("候选资料数量", options=[3, 6, 10], value=6)
-            search = right.form_submit_button("查找资料", type="primary", width="stretch")
-        st.caption("通过公开搜索引擎查找候选链接；摘要用于筛选，只有实际读取的正文才会入库。")
-        if search:
-            try:
-                with st.spinner("正在查找公开资料…"):
-                    results = search_web(topic, limit)
-                st.session_state.search_results = results
-                st.session_state.search_topic = topic
-                st.session_state.search_revision = st.session_state.get("search_revision", 0) + 1
-            except Exception as exc:
-                st.error(str(exc))
-        results = st.session_state.get("search_results", [])
-        if results:
-            st.caption(f"关于「{st.session_state.get('search_topic','')}」找到 {len(results)} 个候选")
-            chosen = []
-            for i, result in enumerate(results):
-                with st.container(border=True):
-                    if st.checkbox(result["title"], key=f"candidate-{st.session_state.get('search_revision',0)}-{i}"):
-                        chosen.append(result)
-                    st.caption(result["snippet"][:420])
-                    st.link_button("查看原网页 ↗", result["url"])
-            if st.button(f"读取选中资料的正文（{len(chosen)}）", type="primary", disabled=not chosen or bool(work.active)):
-                start_job(engine, "collect", chosen)
-        elif "search_results" in st.session_state:
-            st.info("本次没有搜索结果，可尝试更短的关键词，或直接添加网页链接。")
-    with tab_url:
-        with st.form("url-source"):
-            urls = st.text_area("公开网页 URL，每行一个，最多 10 个", placeholder="粘贴丝绸博物馆、非遗机构等发布的公开文章链接")
-            add_urls = st.form_submit_button("读取网页正文", type="primary", disabled=bool(work.active))
-        if add_urls:
-            values = list(dict.fromkeys(u.strip() for u in urls.splitlines() if u.strip()))
-            start_job(engine, "collect", [{"url": u, "title": u} for u in values])
-    with tab_upload:
-        uploads = st.file_uploader("支持 TXT、Markdown、文本型 PDF · 每份最多 4 MB", type=["txt", "md", "pdf"], accept_multiple_files=True)
-        if st.button("保存上传资料", disabled=not uploads or bool(work.active)):
-            for upload in uploads[:10]:
+    with st.expander("手动搜集资料 · 搜索 / 网页链接 / 上传", expanded=False):
+        tab_search, tab_url, tab_upload = st.tabs(["搜索公开资料", "添加网页链接", "上传 / 粘贴资料"])
+        with tab_search:
+            with st.form("research-search"):
+                topic = st.text_input("研究主题", placeholder="例如：缂丝工艺、传统织锦与丝绸之路文化交流", value="丝绸文化 缂丝 云锦 传统织造技艺")
+                left, right = st.columns([3, 1], vertical_alignment="bottom")
+                limit = left.select_slider("候选资料数量", options=[3, 6, 10], value=6)
+                search = right.form_submit_button("查找资料", type="primary", width="stretch")
+            st.caption("通过公开搜索引擎查找候选链接；摘要用于筛选，只有实际读取的正文才会入库。")
+            if search:
                 try:
-                    data = parse_document(upload.name, upload.getvalue())
-                    work.sources.add({**data, "title": upload.name, "url": "", "filename": upload.name})
-                except Exception as exc:
-                    st.error(f"{upload.name}：{exc}")
-            st.success("有效资料已保存到下方资料库，可预览后构建。")
-        with st.expander("直接粘贴文本"):
-            with st.form("paste-source"):
-                title = st.text_input("资料标题")
-                text = st.text_area("正文", height=160, max_chars=60000)
-                save_text = st.form_submit_button("保存正文", disabled=bool(work.active))
-            if save_text:
-                try:
-                    work.sources.add({**parse_document("pasted.txt", text.encode()), "title": title.strip() or "粘贴资料", "url": ""})
-                    st.success("已保存。请在下方勾选并构建。")
+                    with st.spinner("正在查找公开资料…"):
+                        results = search_web(topic, limit)
+                    st.session_state.search_results = results
+                    st.session_state.search_topic = topic
+                    st.session_state.search_revision = st.session_state.get("search_revision", 0) + 1
                 except Exception as exc:
                     st.error(str(exc))
-    job_panel(engine)
-    st.markdown("### 已收集的资料")
+            results = st.session_state.get("search_results", [])
+            if results:
+                st.caption(f"关于「{st.session_state.get('search_topic','')}」找到 {len(results)} 个候选")
+                chosen = []
+                for i, result in enumerate(results):
+                    with st.container(border=True):
+                        if st.checkbox(result["title"], key=f"candidate-{st.session_state.get('search_revision',0)}-{i}"):
+                            chosen.append(result)
+                        st.caption(result["snippet"][:420])
+                        st.link_button("查看原网页 ↗", result["url"])
+                if st.button(f"读取选中资料的正文（{len(chosen)}）", type="primary", disabled=not chosen or bool(work.active)):
+                    start_job(engine, "collect", chosen)
+            elif "search_results" in st.session_state:
+                st.info("本次没有搜索结果，可尝试更短的关键词，或直接添加网页链接。")
+        with tab_url:
+            with st.form("url-source"):
+                urls = st.text_area("公开网页 URL，每行一个，最多 10 个", placeholder="粘贴丝绸博物馆、非遗机构等发布的公开文章链接")
+                add_urls = st.form_submit_button("读取网页正文", type="primary", disabled=bool(work.active))
+            if add_urls:
+                values = list(dict.fromkeys(u.strip() for u in urls.splitlines() if u.strip()))
+                start_job(engine, "collect", [{"url": u, "title": u} for u in values])
+        with tab_upload:
+            uploads = st.file_uploader("支持 TXT、Markdown、文本型 PDF · 每份最多 4 MB", type=["txt", "md", "pdf"], accept_multiple_files=True)
+            if st.button("保存上传资料", disabled=not uploads or bool(work.active)):
+                for upload in uploads[:10]:
+                    try:
+                        data = parse_document(upload.name, upload.getvalue())
+                        work.sources.add({**data, "title": upload.name, "url": "", "filename": upload.name})
+                    except Exception as exc:
+                        st.error(f"{upload.name}：{exc}")
+                st.success("有效资料已保存到下方资料库，可预览后构建。")
+            with st.expander("直接粘贴文本"):
+                with st.form("paste-source"):
+                    title = st.text_input("资料标题")
+                    text = st.text_area("正文", height=160, max_chars=60000)
+                    save_text = st.form_submit_button("保存正文", disabled=bool(work.active))
+                if save_text:
+                    try:
+                        work.sources.add({**parse_document("pasted.txt", text.encode()), "title": title.strip() or "粘贴资料", "url": ""})
+                        st.success("已保存。请在下方勾选并构建。")
+                    except Exception as exc:
+                        st.error(str(exc))
+    st.markdown('<div class="section-space"></div>', unsafe_allow_html=True)
+    section_heading("YOUR SOURCES", "资料库", "已保存的正文与来源，可选择后再次构建。")
     sources = work.sources.list()
     if not sources:
         st.info("先搜索、添加链接或上传一份资料。已入库的文本向量可在检索观察台查看。")
@@ -211,7 +242,7 @@ def collect_page(engine):
                 st.link_button("来源 ↗", source["url"])
         with st.expander("预览正文 · " + source["title"][:65]):
             if source.get("truncated"):
-                st.warning(f"原正文 {source['original_chars']:,} 字符，仅保留前 60,000 字符；构建使用的内容如下。")
+                st.warning(f"原正文 {source['original_chars']:,} 字符，当前保存 {source['chars']:,} 字符；构建使用的内容如下。")
             with st.container(height=230):
                 st.text(source["text"])
             st.caption(f"资料 ID {source['id']} · LightRAG {source['doc_id']}")
@@ -392,7 +423,7 @@ def render(engine, route):
         st.caption("● 中文向量模型已就绪")
         st.caption("● Qdrant 本地引擎" if engine.settings.qdrant_mode == "local" else "● Qdrant Server")
         st.divider()
-        st.caption("资料 → 实体 / 关系 → 图谱 + 向量")
+        st.caption("资料 → 本体抽取 → 原文校验 → 图谱")
         st.caption("展示真实调用与处理结果，模型隐藏思维链不在界面中展示。")
     from lab.ontology.ui import semantic_page
     try:
@@ -400,4 +431,4 @@ def render(engine, route):
     except Exception as exc:
         from lab.engine import safe_error
         st.error(safe_error(exc, engine.settings))
-    st.markdown('<div class="footer">ATLAS · SOURCES → LIGHTRAG → GRAPH & VECTORS</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">ATLAS · 让文化知识有迹可循</div>', unsafe_allow_html=True)
