@@ -57,6 +57,7 @@ def parse_document(name, body, content_type=""):
     if len(body) > MAX_BYTES:
         raise ValueError("文件超过 4 MB，请拆分后再导入。")
     lower = name.lower().split("?")[0]
+    published_metadata = []
     if body.startswith(b"%PDF") or lower.endswith(".pdf"):
         from pypdf import PdfReader
         reader = PdfReader(io.BytesIO(body))
@@ -68,6 +69,8 @@ def parse_document(name, body, content_type=""):
         text = "\n\n".join(f"[第 {i} 页]\n{text}" for i, text in enumerate(pages, 1))
         kind = "pdf"
     elif "html" in content_type or lower.endswith((".html", ".htm")) or b"<html" in body[:1000].lower() or b"<!doctype" in body[:1000].lower():
+        from lab.trends import metadata_dates
+        published_metadata = metadata_dates(body)
         import trafilatura
         text = trafilatura.extract(body, include_comments=False, include_tables=True, favor_precision=True) or ""
         kind = "web"
@@ -78,7 +81,7 @@ def parse_document(name, body, content_type=""):
     if len(text) < 40:
         raise ValueError("未提取到足够正文。可能是扫描 PDF、动态网页或受限内容；请改用文本文件。")
     truncated = len(text) > MAX_CHARS
-    return {"text": text[:MAX_CHARS], "kind": kind, "truncated": truncated, "original_chars": len(text)}
+    return {"text": text[:MAX_CHARS], "kind": kind, "truncated": truncated, "original_chars": len(text), "published_metadata": published_metadata}
 
 
 def fetch_source(url, title=""):

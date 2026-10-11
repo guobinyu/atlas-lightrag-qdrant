@@ -55,6 +55,9 @@ class Workspace:
         from lab.ontology.service import SemanticService
         self.semantic = SemanticService(self.directory / "ontology", self)
         self.semantic.auto_publish()
+        from lab.campaigns import CampaignService
+        self.campaigns = CampaignService(self)
+        self.campaigns.interrupt()
         self.cached_snapshot = None
         # Never automatically resubmit a write that was interrupted by restart.
         for path in self.job_dir.glob("*.json"):
@@ -64,6 +67,8 @@ class Workspace:
                 value["message"] = ("进程已中断。已采集资料和成功文本块保留；在校验报告中重试失败或中断块。尚未创建批次时请重新启动任务。"
                                     if value['kind'].startswith('semantic') else
                                     "进程已中断。请刷新资料状态，确认 LightRAG 的实际文档状态后再重试。")
+                if value['kind'].startswith('campaign_'):
+                    value['message'] = '营销任务已中断；已保存资料和版本，可在热点营销页重试失败阶段。'
                 path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def emit(self, event, data):
@@ -76,6 +81,8 @@ class Workspace:
 
     def start(self, kind, inputs):
         self.engine.ready.result()
+        if kind in {'campaign_search', 'campaign_generate', 'campaign_revise', 'campaign_retry', 'campaign_evergreen', 'campaign_recheck'}:
+            return self._start_campaign(kind, inputs)
         if kind in {"semantic", "semantic_retry", "semantic_auto"}:
             return self._start_semantic(kind, inputs)
         if kind not in {"collect", "build", "retry"}:
@@ -121,6 +128,42 @@ class Workspace:
             future = asyncio.run_coroutine_threadsafe(run(), self.engine.loop)
             return future, job
         except Exception:
+            self.engine.gate.release()
+            raise
+
+    def _start_campaign(self, kind, inputs):
+        self.llm.settings.validate()
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError('已有检索或构建在执行，请等待完成。')
+        try:
+            run, operation = self.campaigns.prepare(kind, inputs)
+            job = Job(self.job_dir, kind, [])
+            operation['job_id'] = job.value['id']
+            self.campaigns.save(run)
+            job.update(campaign_id=run['id'], operation_id=operation['id'], phase=operation['stage'])
+            self.active = job
+
+            async def execute():
+                try:
+                    await self.campaigns.execute(run, operation, job)
+                except Exception as exc:
+                    from lab.engine import safe_error
+                    message = safe_error(exc, self.engine.settings)
+                    if self.llm.settings.api_key:
+                        message = message.replace(self.llm.settings.api_key, '[redacted]')
+                    operation.update(status='failed', message=message, finished_at=utc_now())
+                    self.campaigns.save(run)
+                    job.emit('job.failed', {'message': message, 'error_type': type(exc).__name__})
+                    job.update(status='failed', message=message)
+                finally:
+                    job.update(finished_at=utc_now())
+                    self.active = None
+                    self.engine.gate.release()
+                return job.snapshot()
+
+            return asyncio.run_coroutine_threadsafe(execute(), self.engine.loop), job
+        except Exception:
+            self.active = None
             self.engine.gate.release()
             raise
 

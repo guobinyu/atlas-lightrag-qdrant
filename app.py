@@ -9,7 +9,7 @@ from lab.charts import scatter, short_title
 from lab.config import ROOT, load_settings
 from lab.engine import Engine, safe_error
 from lab.trace import list_runs, replay_state
-from lab.workbench_ui import navigation, render
+from lab.workbench_ui import header, navigation, render
 
 
 st.set_page_config(page_title="Atlas · 知识工作台", page_icon="◈", layout="wide")
@@ -128,8 +128,7 @@ with st.sidebar:
                 st.error(safe_error(exc, settings))
         st.caption("接入已有 LightRAG 工作区或导入资料，请查看项目 README。")
 
-st.markdown('<div class="eyebrow">RETRIEVAL OBSERVATORY <span>真实调用 · 可回放</span></div>', unsafe_allow_html=True)
-st.markdown('<h1>看见一次语义检索</h1><p class="subtitle">从问题向量到相关片段，把 LightRAG 与 Qdrant 的检索过程展开给你看。</p>', unsafe_allow_html=True)
+header('看见一次语义检索', '从问题向量到相关片段，把 LightRAG 与 Qdrant 的检索过程展开给你看。', 'ATLAS / RETRIEVAL OBSERVATORY')
 
 with st.container(key="query-panel"):
     with st.form("query-form", border=False):

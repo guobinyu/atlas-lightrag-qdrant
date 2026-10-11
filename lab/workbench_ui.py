@@ -10,13 +10,14 @@ from lab.graph import graph_figure, subgraph
 from lab.llm import LLMSettings
 from lab.sources import MAX_BYTES, parse_document, search_web
 
-PAGES = {"collect": "资料工作台", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "模型设置"}
+PAGES = {"collect": "资料工作台", "campaign": "热点营销", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "模型设置"}
 STATUS = {"collected": "待构建", "pending": "等待处理", "indexing": "构建中", "processing": "处理中", "processed": "已入库", "failed": "失败", "interrupted": "中断", "preprocessed": "待完成"}
 EVENTS = {"job.started": "任务开始", "source.fetching": "读取网页正文", "source.collected": "资料已保存", "source.failed": "资料读取失败", "document.started": "文档切块与抽取", "llm.started": "调用抽取模型", "llm.completed": "模型返回", "llm.failed": "模型调用失败", "document.completed": "图谱与向量已写入", "document.failed": "文档构建失败", "indexes.refreshing": "读取最新索引", "build.completed": "构建完成", "collection.completed": "采集完成", "job.failed": "任务失败"}
 EVENTS.update({"embedding.started": "向量化开始", "embedding.completed": "向量化完成", "vectors.written": "Qdrant 写入完成"})
 EVENTS.update({"semantic.chunk.started": "语义文本块开始抽取", "semantic.chunk.completed": "语义候选已保存", "semantic.chunk.failed": "语义文本块失败"})
 EVENTS.update({"semantic.verification.started": "模型证据检查", "semantic.verification.completed": "证据检查完成", "semantic.batch.created": "语义批次已创建"})
 EVENTS.update({"retry.started": "重试工作区未完成文档", "retry.completed": "重试完成"})
+EVENTS['campaign.progress'] = '热点营销进度'
 
 
 def navigation():
@@ -28,7 +29,8 @@ def navigation():
         st.session_state.navigation_url = route
     with st.sidebar:
         st.markdown('<div class="brand"><div class="brand-icon">◈</div><div>Atlas<small>KNOWLEDGE WORKSPACE</small></div></div>', unsafe_allow_html=True)
-        choice = st.radio("工作区导航", list(PAGES), index=None, format_func=PAGES.get, key="workspace_page")
+        st.markdown('<div class="side-label">工作区导航</div>', unsafe_allow_html=True)
+        choice = st.radio("工作区导航", list(PAGES), index=None, format_func=PAGES.get, key="workspace_page", label_visibility="collapsed", width="stretch")
         if choice != route:
             st.query_params["view"] = choice
             st.session_state.navigation_url = choice
@@ -37,7 +39,7 @@ def navigation():
 
 
 def header(title, subtitle, tag="ATLAS / KNOWLEDGE WORKSPACE"):
-    st.markdown(f'<div class="eyebrow">{tag}<span>资料 · 关系 · 证据</span></div><h1>{title}</h1><p class="subtitle">{subtitle}</p>', unsafe_allow_html=True)
+    st.markdown(f'<div class="page-header"><div class="eyebrow">{escape(tag)}<span>资料 · 关系 · 证据</span></div><h1>{escape(title)}</h1><p class="subtitle">{escape(subtitle)}</p></div>', unsafe_allow_html=True)
 
 
 def section_heading(kicker, title, copy=''):
@@ -70,7 +72,13 @@ def job_panel(engine):
         st.markdown(f'<div class="task-top"><strong>{"当前执行" if status == "running" else "最近执行"}</strong><span class="task-badge {escape(status)}">{escape(status_label)}</span></div>', unsafe_allow_html=True)
         a, b = st.columns([3, 1])
         created = datetime.fromisoformat(job['created_at']).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M')
-        a.caption(f"{('本体图谱构建' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
+        a.caption(f"{('热点营销' if job['kind'].startswith('campaign_') else '本体图谱构建' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
+        if job['kind'].startswith('campaign_'):
+            st.caption(' → '.join(['理解需求', '搜集资料', '推理品牌与产品', '品牌匹配', '生成方案']))
+            st.write('当前阶段：' + job.get('phase', '理解需求'))
+            counts = job.get('counts', {})
+            st.caption(f"已读取 {counts.get('sources', 0)} 份正文 · 已提取 {counts.get('extracted', 0)} 份 · 已匹配 {counts.get('matched', 0)} 个话题")
+            st.link_button('查看热点营销结果', '/?view=campaign&campaign=' + job['campaign_id'])
         b.caption(job.get('topic', ''))
         if job['kind'].startswith('semantic'):
             phase = 1 if job.get('batch_id') else 0
@@ -100,9 +108,9 @@ def job_panel(engine):
                 st.write(f"目标 {result['requested']} 份 · 已读取 {result['collected']} 份")
                 if result['collected'] < result['requested']:
                     st.warning('可读取资料不足目标数量，未用重复资料补足。可调整主题重试。')
-            metrics = st.columns(4)
-            for col, name, value in zip(metrics, ['抽取陈述', '已发布', '未发布', '失败文本块'], [result['extracted'], result['published'], result['blocked'], result['failed_blocks']]):
-                col.metric(name, value)
+            metrics = st.columns(2)
+            for index, (name, value) in enumerate(zip(['抽取陈述', '已发布', '未发布', '失败文本块'], [result['extracted'], result['published'], result['blocked'], result['failed_blocks']])):
+                metrics[index % 2].metric(name, value)
             if result.get('batch_id'):
                 st.link_button('查看本次标准语义图谱', '/?view=semantic&batch=' + result['batch_id'])
             if result.get('failures'):
@@ -115,12 +123,12 @@ def job_panel(engine):
                 st.caption("本次没有新增实体或关系；可能为重复资料，或模型未抽取到有效内容。")
             show_links()
         events = job["events"]
-        for event in events[-4:]:
-            data = event["data"]
-            suffix = data.get("title") or data.get("model") or data.get("message") or ""
-            elapsed = f" · {data['duration_ms'] / 1000:.1f}s" if "duration_ms" in data else ""
-            st.caption(f"{event['at'][11:19]}　{EVENTS.get(event['event_type'],event['event_type'])}　{suffix}{elapsed}")
-        with st.expander(f"全部执行记录 · {len(events)} 个事件"):
+        with st.expander(f"全部执行记录 · {len(events)} 个事件", expanded=status == "running"):
+            for event in events[-4:]:
+                data = event["data"]
+                suffix = data.get("title") or data.get("model") or data.get("message") or ""
+                elapsed = f" · {data['duration_ms'] / 1000:.1f}s" if "duration_ms" in data else ""
+                st.caption(f"{event['at'][11:19]}　{EVENTS.get(event['event_type'],event['event_type'])}　{suffix}{elapsed}")
             st.json(events, expanded=False)
             st.download_button("导出任务记录", json.dumps(job, ensure_ascii=False, indent=2), file_name=f"build-{job['id'][:8]}.json", mime="application/json", key="export-current-job")
         if status != "running" and st.button("刷新资料和图谱状态", key="refresh-after-job", width="stretch"):
@@ -148,21 +156,29 @@ def collect_page(engine):
     steps = [('01', '确定主题', '选一个想了解的文化方向'), ('02', '搜集资料', '读取网页，保留原始来源'), ('03', '抽取与校验', '按本体建模，检查原文依据'), ('04', '探索图谱', '自动发布，查看关系与证据')]
     st.markdown('<div class="workspace-flow">' + ''.join(f'<div class="workspace-step"><b>{n}</b><div><strong>{name}</strong><small>{note}</small></div></div>' for n, name, note in steps) + '</div>', unsafe_allow_html=True)
     from lab.ontology.profile import DOMAINS
-    with st.container(key='auto-build-panel'):
-        section_heading('START A COLLECTION', '你想探索什么？', '输入主题，其余步骤交给工作台。建议从 3 份资料开始。')
-        with st.form('semantic-auto', border=False):
-            auto_topic = st.text_input('研究主题', '宋朝文化', max_chars=300, key='auto-topic')
-            a, b = st.columns(2)
-            auto_limit = a.number_input('希望读取的资料数量', 1, 10, 3)
-            auto_domain = b.selectbox('本体领域', ['culture', 'silk', 'tea', 'wine'], format_func=lambda k: DOMAINS[k]['label'])
-            automatic = st.form_submit_button('一键搜集并构建本体图谱', type='primary', width='stretch', disabled=bool(work.active) or not work.llm.configured)
-        st.markdown(f'<div class="connection-pill {"" if work.llm.configured else "offline"}"><i></i>{escape(work.llm.settings.model or "请先连接模型")} · CIDOC CRM 7.1.3</div>', unsafe_allow_html=True)
-        st.caption('正文将发送至已配置模型。本体校验与证据检查通过后自动发布，无需人工审核。')
-        with st.expander('了解资料与抽取范围'):
-            st.caption('最多 10 份资料，每份使用前 9,000 字符。资料相关性主要由检索词决定，尚无独立相关性评分。')
-        if automatic:
-            start_job(engine, 'semantic_auto', {'topic': auto_topic, 'limit': int(auto_limit), 'domain': auto_domain})
-    job_panel(engine)
+    intake, activity = st.columns([1.5, 1], gap='medium')
+    with intake:
+        with st.container(key='auto-build-panel'):
+            section_heading('START A COLLECTION', '你想探索什么？', '输入主题，其余步骤交给工作台。建议从 3 份资料开始。')
+            with st.form('semantic-auto', border=False):
+                auto_topic = st.text_input('研究主题', '宋朝文化', max_chars=300, key='auto-topic')
+                a, b = st.columns(2)
+                auto_limit = a.number_input('希望读取的资料数量', 1, 10, 3)
+                auto_domain = b.selectbox('本体领域', ['culture', 'silk', 'tea', 'wine'], format_func=lambda k: DOMAINS[k]['label'])
+                automatic = st.form_submit_button('一键搜集并构建本体图谱', type='primary', width='stretch', disabled=bool(work.active) or not work.llm.configured)
+            st.markdown(f'<div class="connection-pill {"" if work.llm.configured else "offline"}"><i></i>{escape(work.llm.settings.model or "请先连接模型")} · CIDOC CRM 7.1.3</div>', unsafe_allow_html=True)
+            st.caption('正文将发送至已配置模型。本体校验与证据检查通过后自动发布，无需人工审核。')
+            with st.expander('了解资料与抽取范围'):
+                st.caption('最多 10 份资料，每份使用前 9,000 字符。资料相关性主要由检索词决定，尚无独立相关性评分。')
+            if automatic:
+                start_job(engine, 'semantic_auto', {'topic': auto_topic, 'limit': int(auto_limit), 'domain': auto_domain})
+    with activity, st.container(key='collection-activity'):
+        if work.jobs():
+            job_panel(engine)
+        else:
+            section_heading('YOUR WORKSPACE', '从第一份资料开始', '输入主题后，任务进度和处理结果会显示在这里。')
+            st.markdown('**1. 搜集资料**　保留正文和来源\n\n**2. 构建知识**　提取实体与关系\n\n**3. 探索结果**　查看图谱或开始营销策划')
+        st.link_button('打开热点营销 →', '/?view=campaign', width='stretch')
     if not work.llm.configured:
         st.info("资料搜索和预览已可用。生成图谱前，请在「模型设置」连接用于实体关系抽取的 LLM；当前向量模型已经可用。")
     with st.expander("手动搜集资料 · 搜索 / 网页链接 / 上传", expanded=False):
@@ -232,20 +248,23 @@ def collect_page(engine):
         st.info("先搜索、添加链接或上传一份资料。已入库的文本向量可在检索观察台查看。")
         return
     selected = []
-    for source in sources:
-        row, detail = st.columns([4, 1])
-        with row:
-            if st.checkbox(f"{source['title']} · {source['chars']:,} 字符 · {STATUS.get(source['status'],source['status'])}", key=f"source-{source['id']}"):
-                selected.append(source["id"])
-        with detail:
-            if source.get("url"):
-                st.link_button("来源 ↗", source["url"])
-        with st.expander("预览正文 · " + source["title"][:65]):
-            if source.get("truncated"):
-                st.warning(f"原正文 {source['original_chars']:,} 字符，当前保存 {source['chars']:,} 字符；构建使用的内容如下。")
-            with st.container(height=230):
-                st.text(source["text"])
-            st.caption(f"资料 ID {source['id']} · LightRAG {source['doc_id']}")
+    st.caption(f"共 {len(sources)} 份资料 · 勾选正文后，在下方选择构建方式。")
+    with st.container(height=480 if len(sources) > 3 else "content", border=False, key="source-library"):
+        for source in sources:
+            with st.container(border=True):
+                row, detail = st.columns([4, 1])
+                with row:
+                    if st.checkbox(f"{source['title']} · {source['chars']:,} 字符 · {STATUS.get(source['status'],source['status'])}", key=f"source-{source['id']}"):
+                        selected.append(source["id"])
+                with detail:
+                    if source.get("url"):
+                        st.link_button("来源 ↗", source["url"])
+                with st.expander("预览正文 · " + source["title"][:65]):
+                    if source.get("truncated"):
+                        st.warning(f"原正文 {source['original_chars']:,} 字符，当前保存 {source['chars']:,} 字符；构建使用的内容如下。")
+                    with st.container(height=230):
+                        st.text(source["text"])
+                    st.caption(f"资料 ID {source['id']} · LightRAG {source['doc_id']}")
     st.caption("构建会将所选正文发送至模型设置中的抽取服务，生成实体、关系与三类向量。使用本机 Ollama 时抽取在本机执行。")
     if st.button(f"用 LightRAG 构建所选资料（{len(selected)}）", type="primary", width="stretch", disabled=not selected or bool(work.active) or not work.llm.configured):
         start_job(engine, "build", selected)
@@ -297,10 +316,11 @@ def graph_page(engine):
     if data is None:
         return
     nodes, edges = data["nodes"], data["edges"]
-    a, b, c = st.columns(3)
-    a.metric("实体", len(nodes))
-    b.metric("关系", len(edges))
-    c.metric("Qdrant 向量", sum(data["counts"].values()))
+    with st.container(key='summary-metrics'):
+        a, b, c = st.columns(3)
+        a.metric("实体", len(nodes))
+        b.metric("关系", len(edges))
+        c.metric("Qdrant 向量", sum(data["counts"].values()))
     if not nodes:
         st.info("当前知识库尚未生成实体图谱。请在资料工作台勾选正文并执行 LightRAG 构建。原有文本向量不会自动变成图谱。")
         st.link_button("去收集与构建资料", "/?view=collect")
@@ -312,11 +332,12 @@ def graph_page(engine):
     shown_nodes, shown_edges = subgraph(nodes, edges, focus, depth, kind)
     st.caption(f"当前显示 {len(shown_nodes)} / {len(nodes)} 个实体，{len(shown_edges)} / {len(edges)} 条关系 · 最多展示 160 个实体 · 图谱模型抽取结果需结合原文核查")
     left, right = st.columns([2.2, 1])
-    with left:
+    with left, st.container(key="knowledge-canvas"):
+        section_heading("KNOWLEDGE MAP", "实体关系图")
         chart_key = f"knowledge-graph-{focus}-{kind}-{depth}-{data['updated_at']}"
         selection = st.plotly_chart(graph_figure(shown_nodes, shown_edges), key=chart_key, on_select="rerun", selection_mode="points", width="stretch", theme=None, config={"displaylogo": False})
-    with right:
-        st.markdown("**知识检查器**")
+    with right, st.container(key="knowledge-inspector"):
+        section_heading("INSPECTOR", "知识检查器")
         options = [n["id"] for n in shown_nodes]
         picked = selection.selection.points
         selected = None
@@ -345,9 +366,10 @@ def vector_page(engine):
     if data is None:
         return
     names = {"chunks": "文本块", "entities": "实体", "relationships": "关系"}
-    columns = st.columns(3)
-    for col, name in zip(columns, names):
-        col.metric(names[name] + "向量", data["counts"][name])
+    with st.container(key='summary-metrics'):
+        columns = st.columns(3)
+        for col, name in zip(columns, names):
+            col.metric(names[name] + "向量", data["counts"][name])
     kind = st.segmented_control("向量集合", list(names), default="chunks", format_func=names.get, selection_mode="single") or "chunks"
     space = data["spaces"][kind]
     st.caption(f"{space['collection']} · {engine.settings.embedding_dim} 维 · Cosine · workspace={engine.settings.workspace}")
@@ -356,12 +378,14 @@ def vector_page(engine):
         st.info("这个集合还没有向量。完成 LightRAG 构建后会写入相应实体与关系向量。")
         return
     left, right = st.columns([2, 1])
-    with left:
+    with left, st.container(key="vector-canvas"):
+        section_heading("VECTOR SPACE", "向量分布")
         result = st.plotly_chart(scatter(plot, [], show_query=False, show_hits=False, exploration=True), key="vectors-" + kind, on_select="rerun", selection_mode="points", width="stretch", theme=None)
         st.caption(f"展示 {len(plot['points'])} / {space['total']} 个真实向量 · PCA 保留方差 {plot['variance']:.1%} · 各集合坐标不能直接比较")
         if plot.get("note"):
             st.caption(plot["note"])
-    with right:
+    with right, st.container(key="vector-inspector"):
+        section_heading("INSPECTOR", "向量记录")
         selected = None
         if result.selection.points:
             custom = result.selection.points[-1].get("customdata", [])
@@ -370,7 +394,6 @@ def vector_page(engine):
         if selected is None:
             index = st.selectbox("查看向量", range(len(plot["points"])), format_func=lambda i: plot["points"][i]["content"][:45].replace("\n", " "), key="inspect-" + kind)
             selected = plot["points"][index]
-        st.markdown("**向量记录**")
         st.caption("Qdrant point ID")
         st.code(selected["point_id"], language=None, wrap_lines=True)
         st.text(selected["content"])
@@ -387,32 +410,44 @@ def vector_page(engine):
 def settings_page(engine):
     work = engine.workbench
     header("连接你的抽取模型", "Embedding 负责文本向量化；LLM 负责实体与关系抽取。这里配置后者，保存后立即生效。", "ATLAS / MODEL CONNECTIONS")
-    st.success(f"向量模型已就绪：{engine.settings.embedding_model} · {engine.settings.embedding_dim} 维")
     current = work.llm.settings
-    with st.form("extraction-model"):
-        provider = st.selectbox("模型服务", ["ollama", "http"], index=0 if current.provider == "ollama" else 1, format_func=lambda p: "本机 Ollama" if p == "ollama" else "Chat Completions 兼容 API")
-        endpoint = st.text_input("完整接口地址", current.endpoint, help="Ollama 使用 /api/chat；兼容 API 通常使用 /v1/chat/completions。")
-        model = st.text_input("模型名称", current.model, placeholder="例如：qwen3:4b 或服务提供的模型名")
-        key = st.text_input("API Key（本机 Ollama 可留空；留空保留已保存的 Key）", type="password", value="")
-        clear_key = st.checkbox("清除已保存的 API Key", value=False)
-        timeout = st.number_input("单次模型调用超时（秒）", 15, 600, current.timeout, step=15)
-        save = st.form_submit_button("测试连接并保存", type="primary", disabled=bool(work.active))
-    if save:
-        retained_key = current.api_key if endpoint.strip() == current.endpoint and provider == current.provider else ""
-        candidate = LLMSettings(provider, endpoint.strip(), model.strip(), "" if clear_key else key or retained_key, int(timeout))
-        try:
-            with st.spinner("正在向指定服务发送简短测试请求…"):
-                reply = work.configure_llm(candidate).result(timeout=candidate.timeout + 10)
-            st.success("连接成功，已保存。现在可以回到资料工作台构建图谱。")
-            st.caption(f"模型：{reply['model']} · 回复：{reply['reply']}")
-        except Exception as exc:
-            st.error(str(exc).replace(candidate.api_key, "[redacted]") if candidate.api_key else str(exc))
-    st.caption("配置只保存在本机权限为 600 的文件中；API Key 不进入任务记录。连接测试仅证明服务可用，实际抽取质量取决于模型。")
-    with st.expander("使用本机 Ollama"):
-        st.markdown("安装并启动 Ollama，下载能处理中英文和结构化抽取的模型，例如 `ollama pull qwen3:4b`。然后填写模型名及 `http://127.0.0.1:11434/api/chat`。小模型适合体验，正式构建应使用经过评估的模型。")
-    with st.expander("当前存储配置"):
-        st.json({"workspace": engine.settings.workspace, "qdrant_mode": engine.settings.qdrant_mode, "qdrant_url": engine.settings.qdrant_url if engine.settings.qdrant_mode == "server" else "local files", "graph_storage": "LightRAG NetworkX / GraphML", "embedding": engine.settings.embedding_identity()})
-        st.caption("向量模型和已有向量必须保持一致。更改 Qdrant / Embedding 请按 README 修改 .env 并重启服务。")
+    connection, help_panel = st.columns([1.65, 1], gap='medium')
+    with connection, st.container(key='settings-connection'):
+        section_heading('MODEL CONNECTION', '模型连接', '填写服务信息，测试成功后即可使用。')
+        with st.form("extraction-model"):
+            provider = st.selectbox("模型服务", ["ollama", "http"], index=0 if current.provider == "ollama" else 1, format_func=lambda p: "本机 Ollama" if p == "ollama" else "Chat Completions 兼容 API")
+            endpoint = st.text_input("完整接口地址", current.endpoint, help="Ollama 使用 /api/chat；兼容 API 通常使用 /v1/chat/completions。")
+            model = st.text_input("模型名称", current.model, placeholder="例如：qwen3:4b 或服务提供的模型名")
+            key = st.text_input("API Key（本机 Ollama 可留空；留空保留已保存的 Key）", type="password", value="")
+            clear_key = st.checkbox("清除已保存的 API Key", value=False)
+            timeout = st.number_input("单次模型调用超时（秒）", 15, 600, current.timeout, step=15)
+            save = st.form_submit_button("测试连接并保存", type="primary", disabled=bool(work.active))
+        if save:
+            retained_key = current.api_key if endpoint.strip() == current.endpoint and provider == current.provider else ""
+            candidate = LLMSettings(provider, endpoint.strip(), model.strip(), "" if clear_key else key or retained_key, int(timeout))
+            try:
+                with st.spinner("正在向指定服务发送简短测试请求…"):
+                    reply = work.configure_llm(candidate).result(timeout=candidate.timeout + 10)
+                st.success("连接成功，已保存。现在可以回到资料工作台构建图谱。")
+                st.caption(f"模型：{reply['model']} · 回复：{reply['reply']}")
+            except Exception as exc:
+                st.error(str(exc).replace(candidate.api_key, "[redacted]") if candidate.api_key else str(exc))
+    with help_panel, st.container(key='settings-help'):
+        section_heading('CONNECTION STATUS', '当前环境')
+        if work.llm.configured:
+            st.success('抽取模型已配置')
+        else:
+            st.info('请先填写模型连接')
+        st.markdown('**向量模型**')
+        st.write(engine.settings.embedding_model)
+        st.caption(f'{engine.settings.embedding_dim} 维 · 已就绪')
+        st.divider()
+        st.caption("配置只保存在本机权限为 600 的文件中；API Key 不进入任务记录。连接测试仅证明服务可用，实际抽取质量取决于模型。")
+        with st.expander("使用本机 Ollama"):
+            st.markdown("安装并启动 Ollama，下载能处理中英文和结构化抽取的模型，例如 `ollama pull qwen3:4b`。然后填写模型名及 `http://127.0.0.1:11434/api/chat`。小模型适合体验，正式构建应使用经过评估的模型。")
+        with st.expander("当前存储配置"):
+            st.json({"workspace": engine.settings.workspace, "qdrant_mode": engine.settings.qdrant_mode, "qdrant_url": engine.settings.qdrant_url if engine.settings.qdrant_mode == "server" else "local files", "graph_storage": "LightRAG NetworkX / GraphML", "embedding": engine.settings.embedding_identity()})
+            st.caption("向量模型和已有向量必须保持一致。更改 Qdrant / Embedding 请按 README 修改 .env 并重启服务。")
 
 
 def render(engine, route):
@@ -423,11 +458,11 @@ def render(engine, route):
         st.caption("● 中文向量模型已就绪")
         st.caption("● Qdrant 本地引擎" if engine.settings.qdrant_mode == "local" else "● Qdrant Server")
         st.divider()
-        st.caption("资料 → 本体抽取 → 原文校验 → 图谱")
-        st.caption("展示真实调用与处理结果，模型隐藏思维链不在界面中展示。")
+        st.caption("搜集资料 · 探索知识 · 生成方案")
     from lab.ontology.ui import semantic_page
+    from lab.campaign_ui import campaign_page
     try:
-        {"semantic": semantic_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
+        {"campaign": campaign_page, "semantic": semantic_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
     except Exception as exc:
         from lab.engine import safe_error
         st.error(safe_error(exc, engine.settings))

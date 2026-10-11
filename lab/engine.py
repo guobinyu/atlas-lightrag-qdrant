@@ -243,6 +243,21 @@ class Engine:
         future = self._submit_exclusive(self._query, trace, question, top_k, threshold)
         return future, trace
 
+    async def campaign_context(self, question):
+        """Task-internal retrieval: caller already holds gate and owns this loop."""
+        previous = self.rag.chunks_vdb.cosine_better_than_threshold
+        try:
+            self.rag.chunks_vdb.cosine_better_than_threshold = 0.2
+            data = await self.rag.aquery_data(question, QueryParam(
+                mode="naive", top_k=5, chunk_top_k=5, max_total_tokens=4000, enable_rerank=False,
+            ))
+        finally:
+            self.rag.chunks_vdb.cosine_better_than_threshold = previous
+        if data.get("status") == "failure" and data.get("metadata", {}).get("failure_reason") != "no_results":
+            raise ValueError("品牌知识检索失败，请重试当前阶段。")
+        return [{"chunk_id": c.get("chunk_id"), "content": c.get("content", ""),
+                 "file_path": c.get("file_path", "未知来源")} for c in data.get("data", {}).get("chunks", [])[:5]]
+
     async def _query(self, trace, question, top_k, threshold):
         self.active_trace = trace
         trace.emit("query.started", {"mode": "naive", "top_k": top_k, "threshold": threshold, "max_total_tokens": 8000, "rerank": False})
