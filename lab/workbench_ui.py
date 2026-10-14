@@ -10,7 +10,7 @@ from lab.graph import graph_figure, subgraph
 from lab.llm import LLMSettings
 from lab.sources import MAX_BYTES, parse_document, search_web
 
-PAGES = {"collect": "资料工作台", "campaign": "热点营销", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "模型设置"}
+PAGES = {"collect": "资料工作台", "demand": "产品需求探索", "campaign": "热点营销", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "模型设置"}
 STATUS = {"collected": "待构建", "pending": "等待处理", "indexing": "构建中", "processing": "处理中", "processed": "已入库", "failed": "失败", "interrupted": "中断", "preprocessed": "待完成"}
 EVENTS = {"job.started": "任务开始", "source.fetching": "读取网页正文", "source.collected": "资料已保存", "source.failed": "资料读取失败", "document.started": "文档切块与抽取", "llm.started": "调用抽取模型", "llm.completed": "模型返回", "llm.failed": "模型调用失败", "document.completed": "图谱与向量已写入", "document.failed": "文档构建失败", "indexes.refreshing": "读取最新索引", "build.completed": "构建完成", "collection.completed": "采集完成", "job.failed": "任务失败"}
 EVENTS.update({"embedding.started": "向量化开始", "embedding.completed": "向量化完成", "vectors.written": "Qdrant 写入完成"})
@@ -18,6 +18,7 @@ EVENTS.update({"semantic.chunk.started": "语义文本块开始抽取", "semanti
 EVENTS.update({"semantic.verification.started": "模型证据检查", "semantic.verification.completed": "证据检查完成", "semantic.batch.created": "语义批次已创建"})
 EVENTS.update({"retry.started": "重试工作区未完成文档", "retry.completed": "重试完成"})
 EVENTS['campaign.progress'] = '热点营销进度'
+EVENTS['demand.progress'] = '产品需求探索进度'
 
 
 def navigation():
@@ -72,7 +73,10 @@ def job_panel(engine):
         st.markdown(f'<div class="task-top"><strong>{"当前执行" if status == "running" else "最近执行"}</strong><span class="task-badge {escape(status)}">{escape(status_label)}</span></div>', unsafe_allow_html=True)
         a, b = st.columns([3, 1])
         created = datetime.fromisoformat(job['created_at']).astimezone(ZoneInfo('Asia/Shanghai')).strftime('%Y-%m-%d %H:%M')
-        a.caption(f"{('热点营销' if job['kind'].startswith('campaign_') else '本体图谱构建' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
+        a.caption(f"{('产品需求探索' if job['kind'].startswith('demand_') else '热点营销' if job['kind'].startswith('campaign_') else '本体图谱构建' if job['kind'].startswith('semantic') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
+        if job['kind'].startswith('demand_'):
+            st.write('当前阶段：' + job.get('phase', '准备任务'))
+            st.link_button('查看产品需求', '/?view=demand&demand=' + job['demand_id'])
         if job['kind'].startswith('campaign_'):
             st.caption(' → '.join(['理解需求', '搜集资料', '推理品牌与产品', '品牌匹配', '生成方案']))
             st.write('当前阶段：' + job.get('phase', '理解需求'))
@@ -461,8 +465,9 @@ def render(engine, route):
         st.caption("搜集资料 · 探索知识 · 生成方案")
     from lab.ontology.ui import semantic_page
     from lab.campaign_ui import campaign_page
+    from lab.demand_ui import demand_page
     try:
-        {"campaign": campaign_page, "semantic": semantic_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
+        {"demand": demand_page, "campaign": campaign_page, "semantic": semantic_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
     except Exception as exc:
         from lab.engine import safe_error
         st.error(safe_error(exc, engine.settings))
