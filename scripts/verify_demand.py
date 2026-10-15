@@ -33,13 +33,13 @@ def main():
         work.llm.settings = model.settings
         cases = ['custom', 'trend'] if args.case == 'both' else [args.case]
         for case in cases:
-            inputs = {'request': '为校友聚会提出黄酒纪念礼品建议，主题为重逢，预算和数量尚未确定。', 'industry': '黄酒',
+            inputs = {'request': '为校友聚会提出黄酒纪念礼品建议，主题为重逢，可用桂花作视觉意象，但尚未决定改变酒的风味；预算和数量尚未确定。', 'industry': '黄酒',
                       'capabilities': '能生产黄酒、定制标签和礼盒包装', 'brand': '', 'constraints': '不生产服饰，不宣称保健功效',
                       'audience': '参加校友聚会的成年人', 'scene': '校友聚会赠礼', 'theme': '重逢', 'path': case, 'days': 7}
             if case == 'trend':
                 inputs.update(request='结合近期中国文化、非遗、丝绸展览话题，探索日常丝绸产品。', industry='丝绸',
                               capabilities='可生产真丝丝巾和家居服，支持数码印花', constraints='仅开发丝巾或家居服，不生产酒类',
-                              audience='成年消费者', scene='日常穿搭', theme='')
+                              audience='', scene='', theme='')
             run = work.demands.create(inputs)
             entry = {'case': case, 'task_id': run['id'], 'stages': [], 'status': 'running'}
             report['cases'].append(entry)
@@ -58,7 +58,9 @@ def main():
             if not stage('analyze'):
                 entry['status'] = 'failed'
                 continue
-            work.demands.approve(run['id'])
+            analyzed = work.demands.load(run['id'])
+            entry['clarification'] = analyzed['clarifications'][-1]
+            work.demands.confirm(run['id'], analyzed['inputs'], analyzed['revision'])
             if case == 'trend':
                 if not stage('search'):
                     entry['status'] = 'failed'
@@ -75,6 +77,8 @@ def main():
             current = work.demands.load(run['id'])
             batch = current['candidate_rounds'][-1]
             entry['candidate_names'] = [c['name'] for c in batch['candidates']]
+            entry['candidate_format'] = batch.get('format_version', 1)
+            entry['candidate_suggestions'] = [{k: c[k] for k in ('name', 'form', 'story', 'visual_elements', 'design', 'assumptions', 'questions')} for c in batch['candidates']]
             work.demands.select_candidate(run['id'], batch['id'], batch['candidates'][0]['id'])
             if not stage('brief'):
                 entry['status'] = 'failed'
@@ -89,6 +93,9 @@ def main():
             assert current['inputs'] == inputs
             entry.update(status='success', brief_versions=len(current['briefs']), brand_unchanged=current['inputs']['brand'] == '')
             latest = current['briefs'][-1]
+            entry['brief_format'] = latest.get('format_version', 1)
+            entry['followups'] = latest['content'].get('followups', [])
+            entry['exploration_snapshot'] = latest['summary'].get('exploration', {})
             (directory / (case + '.md')).write_text(export_markdown(current, latest), encoding='utf-8')
             (directory / (case + '.json')).write_text(json.dumps(export_bundle(current, latest), ensure_ascii=False, indent=2), encoding='utf-8')
     finally:

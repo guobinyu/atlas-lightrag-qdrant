@@ -1,0 +1,1878 @@
+{
+  "kind": "live-model-synthetic-smoke",
+  "model": {
+    "provider": "http",
+    "endpoint": "https://api.deepseek.com/chat/completions",
+    "model": "deepseek-flash",
+    "timeout": 180,
+    "has_key": true
+  },
+  "profile": "culture-core-v1",
+  "prompt": "culture-extraction-v1",
+  "note": "自动校验不等于人工事实核对；人工类型、方向、证据判断单独记载。未发布任何知识。",
+  "cases": [
+    {
+      "domain": "silk",
+      "input": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+      "status": "success",
+      "chunks": [
+        {
+          "id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "status": "success",
+          "error": null,
+          "end": 74,
+          "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+          "source_id": "silk",
+          "start": 0,
+          "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+          "deferred": [
+            "织造与传统技艺的上下位关系需要未启用属性 P127"
+          ]
+        }
+      ],
+      "candidates": [
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 51,
+            "quote": "演示记录记载：张甲在甲村实施了本次织造",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 32
+          },
+          "id": "33e597c541225b959ad98d6a3a1709d7",
+          "object": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:eb493eb55b57518e8d18183da76181a1",
+            "label": "演示记录",
+            "local_id": "e8",
+            "type": "E31"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e4",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+            "quote": "演示记录记载：张甲在甲村实施了本次织造",
+            "start": 32,
+            "subject": "e8"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 51,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 32,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 64,
+            "quote": "这件织锦样品",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 58
+          },
+          "id": "cef79354415b5f9bbb0d7d3db84315f3",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:silk/2",
+            "label": "织锦",
+            "local_id": "e7",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:silk/2"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:d0d33c92304d568fa9222241772be236",
+            "label": "织锦样品",
+            "local_id": "e6",
+            "type": "E22"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e7",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+            "quote": "这件织锦样品",
+            "start": 58,
+            "subject": "e6"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 64,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 58,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 51,
+            "quote": "实施了本次织造",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 44
+          },
+          "id": "2735efb3da53559180f75b0443fce966",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:silk/0",
+            "label": "织造",
+            "local_id": "e1",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:silk/0"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P32_used_general_technique",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e1",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P32_used_general_technique",
+            "quote": "实施了本次织造",
+            "start": 44,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 51,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 44,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 64,
+            "quote": "制成这件织锦样品",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 56
+          },
+          "id": "c75db865631e59aaae084fcce0b1b896",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:d0d33c92304d568fa9222241772be236",
+            "label": "织锦样品",
+            "local_id": "e6",
+            "type": "E22"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P108_has_produced",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e6",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P108_has_produced",
+            "quote": "制成这件织锦样品",
+            "start": 56,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 64,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 56,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 64,
+            "quote": "使用丝线制成这件织锦样品",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 52
+          },
+          "id": "cf30453048ea58cfb79ed3ef616e8df5",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:aa0614844c3c55f5925530d183bbd27c",
+            "label": "丝线",
+            "local_id": "e5",
+            "type": "E57"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P126_employed",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e5",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P126_employed",
+            "quote": "使用丝线制成这件织锦样品",
+            "start": 52,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 64,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 52,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 51,
+            "quote": "张甲在甲村实施了本次织造",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 39
+          },
+          "id": "2af76ffaeeca5c6bb83320b877a4d100",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:6bcd1142f5ca550f88b2aca4a53ca982",
+            "label": "甲村",
+            "local_id": "e3",
+            "type": "E53"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P7_took_place_at",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e3",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P7_took_place_at",
+            "quote": "张甲在甲村实施了本次织造",
+            "start": 39,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 51,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 39,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "fd9a6bf3f3f84a9e8eba07ccd53cac46",
+          "chunk_id": "1eb6b6eba7195c899a5fb1b122803f6a",
+          "domain": "silk",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "织造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/0"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "张甲",
+              "type": "E21"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "甲村",
+              "type": "E53"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次织造",
+              "type": "E12"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "丝线",
+              "type": "E57"
+            },
+            "e6": {
+              "id": "e6",
+              "label": "织锦样品",
+              "type": "E22"
+            },
+            "e7": {
+              "id": "e7",
+              "label": "织锦",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:silk/2"
+            },
+            "e8": {
+              "id": "e8",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 51,
+            "quote": "张甲在甲村实施了本次织造",
+            "source_hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "source_id": "silk",
+            "start": 39
+          },
+          "id": "2e5ccf619bc1509396f56ee3c4cf2b9e",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:3fefc1d7a3d6501e881e80f53b41b10c",
+            "label": "张甲",
+            "local_id": "e2",
+            "type": "E21"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+          "source": {
+            "hash": "96303781fab53fcdc09d383be8d18f06082636dcfc3d94cf18bc9aded5485553",
+            "id": "silk",
+            "text": "【合成评估，非历史事实】织造是一种传统技艺，不代表某次具体活动。演示记录记载：张甲在甲村实施了本次织造，使用丝线制成这件织锦样品。记录没有说明日期。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:099c409ce2f95d5e8503b7909c9f6768",
+            "label": "本次织造",
+            "local_id": "e4",
+            "type": "E12"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e2",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+            "quote": "张甲在甲村实施了本次织造",
+            "start": 39,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 51,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 39,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        }
+      ],
+      "valid": 7,
+      "total": 7
+    },
+    {
+      "domain": "tea",
+      "input": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+      "status": "success",
+      "chunks": [
+        {
+          "id": "3e10bcad71b65b34800ddeaa8b77d58f",
+          "batch_id": "21c15e787f8a4e0e8e3a534ce7f22ebe",
+          "status": "success",
+          "error": null,
+          "end": 75,
+          "source_hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+          "source_id": "tea",
+          "start": 0,
+          "text": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+          "deferred": [
+            "炒青与制茶之间的概念上下位关系需要未启用属性"
+          ]
+        }
+      ],
+      "candidates": [
+        {
+          "batch_id": "21c15e787f8a4e0e8e3a534ce7f22ebe",
+          "chunk_id": "3e10bcad71b65b34800ddeaa8b77d58f",
+          "domain": "tea",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "炒青",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "制茶",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "李乙",
+              "type": "E21"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次制茶",
+              "type": "E7"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 46,
+            "quote": "演示记录记载：李乙实施了本次制茶，采用炒青技艺。",
+            "source_hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "source_id": "tea",
+            "start": 22
+          },
+          "id": "bc5bcb68310f56869071c162037cca19",
+          "object": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:22d38d51610e5e44b101b5ffb3a6842b",
+            "label": "本次制茶",
+            "local_id": "e4",
+            "type": "E7"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+          "source": {
+            "hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "id": "tea",
+            "text": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:63b4ddda228c5be19e8a2c12e604e736",
+            "label": "演示记录",
+            "local_id": "e5",
+            "type": "E31"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e4",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+            "quote": "演示记录记载：李乙实施了本次制茶，采用炒青技艺。",
+            "start": 22,
+            "subject": "e5"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 46,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 22,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "21c15e787f8a4e0e8e3a534ce7f22ebe",
+          "chunk_id": "3e10bcad71b65b34800ddeaa8b77d58f",
+          "domain": "tea",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "炒青",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "制茶",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "李乙",
+              "type": "E21"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次制茶",
+              "type": "E7"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 38,
+            "quote": "本次制茶",
+            "source_hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "source_id": "tea",
+            "start": 34
+          },
+          "id": "678bff0f03b05a2e9434fe478c2ddd28",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:tea/0",
+            "label": "制茶",
+            "local_id": "e2",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:tea/0"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+          "source": {
+            "hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "id": "tea",
+            "text": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:22d38d51610e5e44b101b5ffb3a6842b",
+            "label": "本次制茶",
+            "local_id": "e4",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e2",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+            "quote": "本次制茶",
+            "start": 34,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 38,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 34,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "21c15e787f8a4e0e8e3a534ce7f22ebe",
+          "chunk_id": "3e10bcad71b65b34800ddeaa8b77d58f",
+          "domain": "tea",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "炒青",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "制茶",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "李乙",
+              "type": "E21"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次制茶",
+              "type": "E7"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 45,
+            "quote": "采用炒青技艺",
+            "source_hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "source_id": "tea",
+            "start": 39
+          },
+          "id": "3a5f9b6db82959f189000330e462f26a",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:tea/1",
+            "label": "炒青",
+            "local_id": "e1",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:tea/1"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P32_used_general_technique",
+          "source": {
+            "hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "id": "tea",
+            "text": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:22d38d51610e5e44b101b5ffb3a6842b",
+            "label": "本次制茶",
+            "local_id": "e4",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e1",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P32_used_general_technique",
+            "quote": "采用炒青技艺",
+            "start": 39,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 45,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 39,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "21c15e787f8a4e0e8e3a534ce7f22ebe",
+          "chunk_id": "3e10bcad71b65b34800ddeaa8b77d58f",
+          "domain": "tea",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "炒青",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "制茶",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:tea/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "李乙",
+              "type": "E21"
+            },
+            "e4": {
+              "concrete": true,
+              "id": "e4",
+              "label": "本次制茶",
+              "type": "E7"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "演示记录",
+              "type": "E31"
+            }
+          },
+          "evidence": {
+            "end": 38,
+            "quote": "李乙实施了本次制茶",
+            "source_hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "source_id": "tea",
+            "start": 29
+          },
+          "id": "99d7d80377745f9fa3da9616ff4b57e7",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:924b346ea0df539a99b1d36e51af0ea2",
+            "label": "李乙",
+            "local_id": "e3",
+            "type": "E21"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+          "source": {
+            "hash": "289947f8cd52b6b1293abcea3e8517f25e643886eae64d0233e0ac492e8eeafb",
+            "id": "tea",
+            "text": "【合成评估，非历史事实】炒青是一种制茶技艺。演示记录记载：李乙实施了本次制茶，采用炒青技艺。记录没有说明时间和地点。不得把一般炒青说明当成另一次事件。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:22d38d51610e5e44b101b5ffb3a6842b",
+            "label": "本次制茶",
+            "local_id": "e4",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e3",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+            "quote": "李乙实施了本次制茶",
+            "start": 29,
+            "subject": "e4"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 38,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 29,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        }
+      ],
+      "valid": 4,
+      "total": 4
+    },
+    {
+      "domain": "wine",
+      "input": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+      "status": "success",
+      "chunks": [
+        {
+          "id": "f183ba44633c5f0db3e066e4d3c81418",
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "status": "success",
+          "error": null,
+          "end": 76,
+          "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+          "source_id": "wine",
+          "start": 0,
+          "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+          "deferred": [
+            "发酵与酿造之间的上下位分类关系需要未启用属性"
+          ]
+        }
+      ],
+      "candidates": [
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 60,
+            "quote": "另一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 55
+          },
+          "id": "dbe55bf412015478a9c4ebda199b2681",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:wine/0",
+            "label": "酿造",
+            "local_id": "e2",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:wine/0"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:7d8f32f0de915424ae93b17560278420",
+            "label": "乙村另一个同名的王丙实施的另一次酿造",
+            "local_id": "e7",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e2",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+            "quote": "另一次酿造",
+            "start": 55,
+            "subject": "e7"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 60,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 55,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 41,
+            "quote": "一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 37
+          },
+          "id": "3f8541c51ac65c868ad39f8165fda036",
+          "object": {
+            "id": "urn:atlas:culture-core-v1:term:wine/0",
+            "label": "酿造",
+            "local_id": "e2",
+            "type": "E55",
+            "uri": "urn:atlas:culture-core-v1:term:wine/0"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:577f7e463f2a54c6a32a16f0b6c692b4",
+            "label": "甲村的王丙实施的一次酿造",
+            "local_id": "e6",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e2",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P2_has_type",
+            "quote": "一次酿造",
+            "start": 37,
+            "subject": "e6"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 41,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 37,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 60,
+            "quote": "乙村另一个同名的王丙实施了另一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 42
+          },
+          "id": "c8ab1ba2c7555d3ab9769bbe9988eb9d",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:e89fe0c305b95ddf83caa5fad9e17492",
+            "label": "乙村另一个同名的王丙",
+            "local_id": "e5",
+            "type": "E21"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:7d8f32f0de915424ae93b17560278420",
+            "label": "乙村另一个同名的王丙实施的另一次酿造",
+            "local_id": "e7",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e5",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+            "quote": "乙村另一个同名的王丙实施了另一次酿造",
+            "start": 42,
+            "subject": "e7"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 60,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 42,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 41,
+            "quote": "甲村的王丙实施了一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 29
+          },
+          "id": "343ad20b26fb56799c043d19d52fee2b",
+          "object": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:82521e0ba2545b229760298f4a7db7e1",
+            "label": "甲村的王丙",
+            "local_id": "e4",
+            "type": "E21"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:577f7e463f2a54c6a32a16f0b6c692b4",
+            "label": "甲村的王丙实施的一次酿造",
+            "local_id": "e6",
+            "type": "E7"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e4",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P14_carried_out_by",
+            "quote": "甲村的王丙实施了一次酿造",
+            "start": 29,
+            "subject": "e6"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 41,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 29,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 60,
+            "quote": "演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 22
+          },
+          "id": "43387588e0395812b47944324aff4404",
+          "object": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:7d8f32f0de915424ae93b17560278420",
+            "label": "乙村另一个同名的王丙实施的另一次酿造",
+            "local_id": "e7",
+            "type": "E7"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:13d9c2a3eb0a5f66892a1b67642b042c",
+            "label": "演示记录",
+            "local_id": "e3",
+            "type": "E31"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e7",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+            "quote": "演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造",
+            "start": 22,
+            "subject": "e3"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 60,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 22,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        },
+        {
+          "batch_id": "e0fa2b48ca274f8c9e406f1c5f720079",
+          "chunk_id": "f183ba44633c5f0db3e066e4d3c81418",
+          "domain": "wine",
+          "entities": {
+            "e1": {
+              "id": "e1",
+              "label": "发酵",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/1"
+            },
+            "e2": {
+              "id": "e2",
+              "label": "酿造",
+              "type": "E55",
+              "uri": "urn:atlas:culture-core-v1:term:wine/0"
+            },
+            "e3": {
+              "id": "e3",
+              "label": "演示记录",
+              "type": "E31"
+            },
+            "e4": {
+              "id": "e4",
+              "label": "甲村的王丙",
+              "type": "E21"
+            },
+            "e5": {
+              "id": "e5",
+              "label": "乙村另一个同名的王丙",
+              "type": "E21"
+            },
+            "e6": {
+              "concrete": true,
+              "id": "e6",
+              "label": "甲村的王丙实施的一次酿造",
+              "type": "E7"
+            },
+            "e7": {
+              "concrete": true,
+              "id": "e7",
+              "label": "乙村另一个同名的王丙实施的另一次酿造",
+              "type": "E7"
+            }
+          },
+          "evidence": {
+            "end": 60,
+            "quote": "演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造",
+            "source_hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "source_id": "wine",
+            "start": 22
+          },
+          "id": "4e5a6ec3fdb9592b9ec2ded81ed2945d",
+          "object": {
+            "concrete": true,
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:577f7e463f2a54c6a32a16f0b6c692b4",
+            "label": "甲村的王丙实施的一次酿造",
+            "local_id": "e6",
+            "type": "E7"
+          },
+          "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+          "source": {
+            "hash": "8d9c1d729326149c1d30b9bebb36bbb49edf1609f91946c5511d1b04ebdf41df",
+            "id": "wine",
+            "text": "【合成评估，非历史事实】发酵是一种酿造技艺。演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造。两次活动的日期和产品均未记载。",
+            "title": "合成评估",
+            "url": ""
+          },
+          "subject": {
+            "id": "urn:atlas:project:f04cf99f-872f-4c42-abb0-bddc09ee668e:entity:13d9c2a3eb0a5f66892a1b67642b042c",
+            "label": "演示记录",
+            "local_id": "e3",
+            "type": "E31"
+          },
+          "versions": {
+            "crm": "7.1.3",
+            "model": {
+              "endpoint": "https://api.deepseek.com/chat/completions",
+              "has_key": true,
+              "model": "deepseek-flash",
+              "provider": "http",
+              "timeout": 180
+            },
+            "profile": "culture-core-v1",
+            "profile_hash": "4a7c7a4b53f2a0007c34671ae66180bd24f3c2411355493694b8d0050db79b40",
+            "prompt": "culture-extraction-v1"
+          },
+          "wire": {
+            "object": "e6",
+            "predicate": "http://www.cidoc-crm.org/cidoc-crm/P70_documents",
+            "quote": "演示记录记载：甲村的王丙实施了一次酿造；乙村另一个同名的王丙实施了另一次酿造",
+            "start": 22,
+            "subject": "e3"
+          },
+          "status": "pending",
+          "validation": {
+            "end": 60,
+            "errors": [],
+            "shacl": "Validation Report\nConforms: True\n",
+            "start": 22,
+            "valid": true
+          },
+          "reviews": [],
+          "publications": []
+        }
+      ],
+      "valid": 6,
+      "total": 6
+    }
+  ],
+  "engineering_review": {
+    "reviewer": "Codex 工程检查（非独立人类专家）",
+    "type_checks": {
+      "silk": "7/7 陈述的两端类型与合成原文建模目标一致",
+      "tea": "4/4 一致；使用 E7 而非虚构有产品的 E12",
+      "wine": "6/6 一致；两个人物和两次活动保持不同 ID"
+    },
+    "direction_checks": "17/17 方向与 CRM 属性定义一致",
+    "evidence_checks": "17/17 引文可定位；结合完整来源快照可支持相应关系。部分引文只含局部短语，单独阅读不充分，审核时应展开全文。",
+    "unknowns": "三份均未生成时间；茶和黄酒未从缺失信息或人物籍贯推造活动地点。",
+    "unsupported_modeling": "概念上下位关系进入 deferred，未强塞为 P2。",
+    "publication": "全部仅为候选，未执行 approve；临时数据库已释放。",
+    "limitations": "仅3份短合成资料、17条候选；不估计真实文化资料的准确率、召回率或专家认同度。30条样例尚待领域人员独立核对。"
+  }
+}

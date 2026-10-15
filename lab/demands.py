@@ -14,6 +14,23 @@ from lab.trends import verify_date, topic_dates
 FIELDS = {'request': '原始需求', 'industry': '行业', 'capabilities': '生产能力', 'brand': '品牌名称',
           'constraints': '已知限制', 'audience': '目标人群', 'scene': '使用场景', 'theme': '文化主题'}
 MAX_CLARIFICATION_ROUNDS = 5
+CONTENT_FORMAT_VERSION = 2
+FOLLOWUP_CATEGORIES = ('商家决定', '设计探索', '资料补齐', '后续验证')
+FOLLOWUP_FIELDS = ('item', 'category', 'owner', 'timing', 'approach')
+PROACTIVE_RULES = '''主动给可讨论、可用于概念设计的建议，不把地标、配色、装饰、包装组合等设计选择全部反问用户。
+优先考虑商家能力、硬性限制、人群、场景和核心用途；未知内容明确为建议或待验证假设。
+不因桂花视觉主题就认定需要开发桂花风味配方，不因杭州文化元素就限定杭州销售。
+不把工艺可落地、不会影响识别、消费者喜欢等判断写成已证实结论，应说明后续报价打样、实际尺寸识别检查或用户反馈等验证方式。
+用户事实只能来自确认的 inputs 和 answers；exploration 中的模型理解与建议不等于用户已确认条件；若 answers_changed_since_analysis 为真，分析早于部分补充回答，应优先采用最新用户回答，不再把已解决的问题列为未知。
+'''
+CANDIDATE_V2 = '''DEMAND_CANDIDATES：生成指定数量、具有实际区别的产品建议。返回 {"candidates":[{"name":"产品名称","form":"具体产品形态","audience":"人群","scene":"场景","theme":"文化主题","reason":"需求、差异化与推荐理由","capability_fit":"能力匹配判断及边界","story":"文化故事主线与情感表达，明确创意与史实","visual_elements":"可供设计的视觉元素与表达意图","design":"主动推荐的设计方向及简短理由","assumptions":["必要假设及验证方式"],"questions":["少量影响方向的关键未知"],"facts":[]}]}。
+候选应在形态、使用体验或文化表达上有实际区别，不能仅更换名称。故事不能只写主题关键词。必要未知不需凑数量，不强迫用户决定所有设计细节。
+'''
+BRIEF_V2 = '''DEMAND_BRIEF：将选中产品整理成可交给下游开展概念设计的文字输入。主动提供方案，而非问题清单。返回 {"title":"标题","overview":"推荐产品、差异化和推荐理由","audience_scene":"为谁设计、使用场景与核心用途","product_goals":"具体形态及设计目标","story":"故事主线、情感表达、视觉元素，区分来源事实与创意","design":"推荐构图、色彩、文字、材料和包装组合，并说明理由","handoff":"建议的核心设计交付和可选方案；明确哪些工作可以先开始，不冒充可生产定稿","assumptions":["必要假设及验证方式"],"followups":[{"item":"需要确认或验证的事项","category":"商家决定或设计探索或资料补齐或后续验证中的一个","owner":"建议责任角色，不编造姓名","timing":"确认时点","approach":"未确认期间如何推进；若某部分必须等待，说明等待什么"}],"facts":[]}。
+不输出 questions 字段。followups 以少量必要事项为目标，无事项可为空，不为凑数添加问题，也不丢弃重要未知。
+地标、配色、包装组合先在正文给推荐，不重复列成无处理方式的问句。品牌文件和经确认的背标文案由商家提供、设计方排版；不编造法定文案或要求设计师决定酒精度和配方。研发及生产参数仅在相关时作为后续商家确认，不阻止可开展的概念设计。
+商家信息由程序附加，不得编造品牌或能力。有旧版本时按修改意见修订，未要求变化的方案保留；旧版问题清单转换为有责任角色、时点和推进方式的事项。
+'''
 
 MERCHANT_FIELDS = ('industry', 'capabilities', 'brand', 'constraints')
 BRIEF_FIELDS = {'overview': '项目与产品概述', 'audience_scene': '目标人群、场景与需求',
@@ -74,6 +91,38 @@ def questions(value):
 def texts(value, fields):
     if not isinstance(value, dict) or any(not isinstance(value.get(k), str) or not value[k].strip() for k in fields):
         raise ValueError('模型输出缺少完整的必要文字字段。')
+
+
+def check_followups(value):
+    items = value.get('followups')
+    if not isinstance(items, list):
+        raise ValueError('后续确认事项必须是数组。')
+    for item in items:
+        texts(item, FOLLOWUP_FIELDS)
+        if item['category'] not in FOLLOWUP_CATEGORIES:
+            raise ValueError('后续确认事项类别无效。')
+    if value.get('questions'):
+        raise ValueError('请将问题整理为有责任和推进方式的 followups，不输出 questions。')
+
+
+def exploration_snapshot(run, inputs, answers):
+    """Only carry model interpretation while its inputs and answers still match."""
+    same = inputs == run['inputs'] and answers == run['summaries'][-1]['answers']
+    analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None) if inputs == run['inputs'] else None
+    if analysis:
+        pending = [q['text'] for q in questions(analysis['questions']) if q['text'] not in answers]
+        result = {'source_analysis_id': analysis['id'], 'source_revision': analysis['revision'],
+                  'unknown': list(dict.fromkeys([*[x for x in analysis['unknown'] if x not in answers or '暂不确定' in answers[x]], *pending])),
+                  'answers_changed_since_analysis': not same,
+                  'suggestions': deepcopy(analysis.get('suggestions', {}))}
+    elif same and run['summaries'][-1].get('exploration'):
+        result = deepcopy(run['summaries'][-1]['exploration'])
+    else:
+        result = {'source_analysis_id': None, 'source_revision': None, 'unknown': [], 'suggestions': {}}
+    for q, a in answers.items():
+        if '暂不确定' in a and q not in result['unknown']:
+            result['unknown'].append(q)
+    return result
 
 
 def check_facts(value, evidence):
@@ -249,6 +298,7 @@ class DemandService:
             if run['revision'] != revision:
                 raise ValueError('需求已变化，请重新打开确认窗口。')
             answers = self.draft_answers(run)
+            exploration = exploration_snapshot(run, inputs, answers)
             if inputs != run['inputs'] or answers != run['summaries'][-1]['answers']:
                 for session in run.get('clarification_sessions', []):
                     if session['revision'] == run['revision'] and session['status'] == 'draft':
@@ -258,6 +308,7 @@ class DemandService:
                 run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(inputs),
                     'answers': answers, 'at': utc_now()})
                 run.update(research_id=None, topic_id=None, selection=None)
+            run['summaries'][-1]['exploration'] = exploration
             run['approved_revision'] = run['revision']
             self.save(run)
             return run
@@ -266,6 +317,7 @@ class DemandService:
         with self.edit(identifier) as run:
             if run['inputs']['path'] == 'custom' and not any(run['inputs'][k] for k in ('audience', 'scene', 'theme')):
                 raise ValueError('定制路径请至少明确人群、场景或文化主题中的一项。')
+            run['summaries'][-1]['exploration'] = exploration_snapshot(run, run['inputs'], run['summaries'][-1]['answers'])
             run['approved_revision'] = run['revision']
             self.save(run)
 
@@ -351,7 +403,7 @@ class DemandService:
                                     'answers': answers, 'at': utc_now()})
             run.update(approved_revision=None, research_id=None, topic_id=None, selection=None)
             session['status'] = 'submitted'
-        op = {'id': uuid.uuid4().hex, 'kind': kind, 'status': 'running', 'stage': '准备任务', 'created_at': utc_now(),
+        op = {'id': uuid.uuid4().hex, 'format_version': CONTENT_FORMAT_VERSION, 'kind': kind, 'status': 'running', 'stage': '准备任务', 'created_at': utc_now(),
               'binding': binding(run), 'selection': deepcopy(run['selection']), 'input_snapshot': deepcopy(run['summaries'][-1]),
               'count': count, 'instruction': instruction, 'base': deepcopy(base), 'cache': {}, 'responses': []}
         if session is not None:
@@ -485,6 +537,7 @@ class DemandService:
 
     async def execute(self, run, op, job):
         kind = op['kind']
+        format_version = op.get('format_version', 1)
         if kind == 'demand_analyze':
             self.checkpoint(run, op, job, '整理需求与澄清问题')
             def check(v):
@@ -497,7 +550,7 @@ class DemandService:
             final_round = len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS
             closing = '已达到五轮上限，只整理摘要和待探索项，questions 必须为空数组，不再追问。' if final_round else '需求澄清最多五轮，优先询问影响产品方向的关键问题。'
             value = await self.ask(run, op, 'analysis',
-                'DEMAND_ANALYZE：整理用户需求，返回 {"known":["对已提供信息的理解"],"unknown":["待探索条件"],"questions":[{"text":"关键问题","options":["可选答案"]}],"suggestions":{"audience":"从用户回答整理的人群","scene":"场景","theme":"主题"}}。选项最多六个，没有合适选项时为空数组。suggestions 仅整理用户已明确的回答，未明确的字段省略，不编造确定条件。问题最多三个，充分时可为空；已回答的问题不重复询问；暂不确定的回答留待探索，不反复强迫用户确定。不得修改用户身份或能力，输出仅作为理解建议。' + closing,
+                'DEMAND_ANALYZE：整理用户需求，返回 {"known":["对已提供信息的理解"],"unknown":["待探索条件"],"questions":[{"text":"关键问题","options":["可选答案"]}],"suggestions":{"audience":"从用户回答整理的人群","scene":"场景","theme":"主题"}}。选项最多六个，没有合适选项时为空数组。suggestions 仅整理用户已明确的回答，未明确的字段省略，不编造确定条件。问题最多三个，充分时可为空；已回答的问题不重复询问；暂不确定的回答留待探索，不反复强迫用户确定。不得修改用户身份或能力，输出仅作为理解建议。' + closing + PROACTIVE_RULES + '澄清只询问影响产品方向的关键条件，酒精度、配方、印刷参数不是常规问题；用户不知道的设计选择由后续候选主动给建议。',
                 op['input_snapshot'], check)
             if not any(c['id'] == op['id'] for c in run['clarifications']):
                 answered = op['input_snapshot']['answers']
@@ -519,15 +572,20 @@ class DemandService:
                 if not isinstance(items, list) or len(items) != op['count']:
                     raise ValueError('产品候选数量不符。')
                 for item in items:
-                    texts(item, CANDIDATE_FIELDS)
+                    texts(item, (*CANDIDATE_FIELDS, 'story', 'visual_elements') if format_version >= 2 else CANDIDATE_FIELDS)
                     strings(item.get('assumptions'), '策划假设')
                     strings(item.get('questions'), '待确认事项')
                     check_facts(item, context['evidence'])
+                if format_version >= 2:
+                    signatures = {tuple(''.join(c[k].split()) for k in ('form', 'scene', 'theme', 'story', 'visual_elements', 'design')) for c in items}
+                    if len(signatures) != len(items):
+                        raise ValueError('候选不能仅更换名称，需在形态、使用体验或文化表达上有区别。')
+            legacy_prompt = 'DEMAND_CANDIDATES：生成指定数量的不同产品建议，不是营销方案。返回 {"candidates":[{"name":"产品名称","form":"产品形态","audience":"人群","scene":"场景","theme":"文化主题","reason":"需求与推荐理由","capability_fit":"能力匹配判断","design":"差异化设计建议","assumptions":["假设"],"questions":["待确认"],"facts":[]}]}。按用户能力和限制给建议，不替换商家身份，不能保证销量。文化故事没有证据时只能作为创意。'
             value = await self.ask(run, op, 'candidates',
-                'DEMAND_CANDIDATES：生成指定数量的不同产品建议，不是营销方案。返回 {"candidates":[{"name":"产品名称","form":"产品形态","audience":"人群","scene":"场景","theme":"文化主题","reason":"需求与推荐理由","capability_fit":"能力匹配判断","design":"差异化设计建议","assumptions":["假设"],"questions":["待确认"],"facts":[]}]}。按用户能力和限制给建议，不替换商家身份，不能保证销量。文化故事没有证据时只能作为创意。',
+                CANDIDATE_V2 + PROACTIVE_RULES if format_version >= 2 else legacy_prompt,
                 {**context, 'count': op['count'], 'previous_candidates': next((b['candidates'] for b in reversed(run['candidate_rounds']) if not stale(run, b)), [])}, check)
             if not any(c['id'] == op['id'] for c in run['candidate_rounds']):
-                run['candidate_rounds'].append({'id': op['id'], 'binding': deepcopy(op['binding']), 'context': deepcopy(context),
+                run['candidate_rounds'].append({'id': op['id'], 'format_version': format_version, 'binding': deepcopy(op['binding']), 'context': deepcopy(context),
                     'at': utc_now(), 'candidates': [{**c, 'id': 'C' + str(i)} for i, c in enumerate(value['candidates'], 1)]})
         else:
             selected = op['selection']
@@ -538,13 +596,17 @@ class DemandService:
             def check(v):
                 texts(v, ('title', *BRIEF_FIELDS))
                 strings(v.get('assumptions'), '策划假设')
-                strings(v.get('questions'), '待确认事项')
+                if format_version >= 2:
+                    check_followups(v)
+                else:
+                    strings(v.get('questions'), '待确认事项')
                 check_facts(v, context['evidence'])
+            legacy_prompt = 'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。'
             value = await self.ask(run, op, 'brief',
-                'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。',
+                BRIEF_V2 + PROACTIVE_RULES if format_version >= 2 else legacy_prompt,
                 {'context': context, 'candidate': candidate, 'base': op['base'], 'instruction': op['instruction']}, check)
             if not any(b['id'] == op['id'] for b in run['briefs']):
-                run['briefs'].append({'id': op['id'], 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
+                run['briefs'].append({'id': op['id'], 'format_version': format_version, 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
                     'selection': deepcopy(selected), 'summary': deepcopy(op['input_snapshot']), 'evidence': deepcopy(context['evidence']),
                     'knowledge_missing': context['knowledge_missing'], 'topic': deepcopy(context['topic']), 'candidate': deepcopy(candidate), 'content': value})
         op.update(status='success', message='本阶段完成，请查看结果并选择下一步。', finished_at=utc_now())
@@ -553,10 +615,13 @@ class DemandService:
 
 
 def export_bundle(run, brief):
-    return {'schema_version': 1, 'task_id': run['id'], 'workspace': run['workspace'], 'brief': deepcopy(brief)}
+    return {'schema_version': brief.get('format_version', 1), 'task_id': run['id'], 'workspace': run['workspace'], 'brief': deepcopy(brief)}
 
 
 def export_markdown(run, brief):
+    if brief.get('format_version', 1) >= 2:
+        return '\n\n'.join('# ' + title + '\n\n' + body if i == 0 else '## ' + title + '\n\n' + body
+                           for i, (title, body, _) in enumerate(brief_sections(run, brief)))
     value = brief['content']
     inputs = brief['summary']['inputs']
     lines = ['# ' + value['title'], '', f"任务：{run['id']} · 需求版本：{brief['binding']['revision']} · 需求单版本：{brief['version']}",
@@ -580,3 +645,39 @@ def export_markdown(run, brief):
     if brief['knowledge_missing']:
         lines += ['', '未检索到相关本地知识，相关创意不代表获得专业知识库支持。']
     return '\n'.join(lines)
+
+
+def brief_sections(run, brief):
+    """Shared v2 content for full exports and the collapsed auxiliary UI."""
+    value = brief['content']
+    meta = (f"概念设计需求单 · 任务：{run['id']} · 需求版本：{brief['binding']['revision']} · 需求单版本：{brief['version']}\n\n"
+            f"候选轮次：{brief['selection']['round_id']} · 候选：{brief['selection']['candidate_id']}")
+    sections = [(value['title'], meta, False),
+                ('推荐产品方案', '\n\n'.join(value[k] for k in ('overview', 'audience_scene', 'product_goals')), False),
+                ('文化主题与故事', value['story'], False),
+                ('具体设计建议', value['design'], False),
+                ('设计交付要求', value['handoff'], False),
+                ('商家能力与硬性限制', '\n'.join(f"- {FIELDS[k]}：{brief['summary']['inputs'][k] or '未提供'}" for k in MERCHANT_FIELDS), False)]
+    sections.append(('必要假设与验证', '\n'.join('- ' + x for x in value['assumptions']) or '暂无额外假设。', True))
+    followups = []
+    for item in value['followups']:
+        followups.append(f"**{item['item']}**\n\n类别：{item['category']} · 建议责任角色：{item['owner']}\n\n确认时点：{item['timing']}\n\n未确认期间：{item['approach']}")
+    sections.append(('后续确认与交接安排', '\n\n'.join(followups) or '暂无额外确认事项。', True))
+    exploration = brief['summary'].get('exploration', {})
+    if exploration.get('unknown') or exploration.get('suggestions'):
+        notes = ['以下是需求确认时保留的探索记录，不代表已确认条件。']
+        notes += ['- 待探索：' + x for x in exploration.get('unknown', [])]
+        notes += [f"- 待确认建议（{FIELDS[k]}）：{v}" for k, v in exploration.get('suggestions', {}).items()]
+        sections.append(('需求探索记录', '\n'.join(notes), True))
+    refs = []
+    if brief.get('topic'):
+        topic = brief['topic']
+        refs += [topic['title'], '时间已核验，热度未验证。' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作文化参考；热度未验证。']
+    for fact in value['facts']:
+        refs.append('- ' + fact['text'])
+        refs += ['  - [' + c['ref'] + '] ' + c['quote'] for c in fact['citations']]
+    refs += [f"- [{key}] {source.get('title') or source.get('file_path') or '知识库片段'}：{source.get('url') or source.get('chunk_id', '')}" for key, source in brief['evidence'].items()]
+    if brief['knowledge_missing']:
+        refs.append('未检索到相关本地知识，相关创意不代表获得专业知识库支持。')
+    sections.append(('参考资料与来源', '\n\n'.join(refs) or '无外部参考资料。', True))
+    return sections

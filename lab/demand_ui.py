@@ -3,7 +3,7 @@ import json
 from html import escape
 import streamlit as st
 
-from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown
+from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections
 from lab.campaign_ui import local_time
 
 PATHS = {'trend': '结合近期话题', 'custom': '人群／场景定制'}
@@ -167,7 +167,7 @@ def clarification_dialog(engine, identifier, stage):
         q = session['questions'][index]
         answer = session['answers'].get(q['id'], {})
         key = f"demand-dialog-{identifier}-{session['id']}-{q['id']}-"
-        st.caption(f"第 {session['round']} / {MAX_CLARIFICATION_ROUNDS} 轮 · 本轮第 {index + 1} / {len(session['questions'])} 题")
+        st.caption(f"第 {session['round']} 轮 · 本轮第 {index + 1} / {len(session['questions'])} 题")
         st.write(q['text'])
         with st.form(key + 'answer'):
             choice = st.radio('选择回答', q['options'], index=q['options'].index(answer['choice']) if answer.get('choice') in q['options'] else None, key=key + 'choice') if q['options'] else None
@@ -196,7 +196,7 @@ def clarification_dialog(engine, identifier, stage):
         return
     st.write('确认需求摘要')
     if len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS:
-        st.info('已达到最多 5 轮澄清。请检查需求摘要，未明确的内容保留为待探索项。')
+        st.info('请检查并确认需求摘要，未明确的内容保留为待探索项。')
     st.caption('以下字段以已保存资料为准。模型建议单独展示，请按需要自行填写；点击确认才会进入后续流程。')
     if analysis:
         st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
@@ -278,7 +278,7 @@ def demand_page(engine):
     if analysis:
         st.write('模型理解（建议）：' + '；'.join(analysis['known']))
         st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
-    st.caption('需求澄清最多 5 轮，每轮最多 3 个问题；可提前确认需求。')
+    st.caption('补充关键信息后，可随时确认需求并继续。')
     limited = len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS and not can_answer(run, analysis)
     a, b = st.columns(2)
     if a.button('查看并确认需求' if limited else '继续完善需求' if analysis else '开始完善需求', disabled=busy or not configured):
@@ -357,8 +357,12 @@ def demand_page(engine):
                 st.write('**' + candidate['name'] + '**')
                 for field, label in labels.items():
                     st.write(f"{label}：{candidate[field]}")
-                st.caption('策划假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
-                st.caption('待确认：' + ('；'.join(candidate['questions']) or '暂无'))
+                if batch.get('format_version', 1) >= 2:
+                    st.write('文化故事：' + candidate['story'])
+                    st.write('视觉元素：' + candidate['visual_elements'])
+                with st.expander('必要假设与关键未知'):
+                    st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
+                    st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
                 facts_view(candidate['facts'])
                 selected = run['selection'] == {'round_id': batch_id, 'candidate_id': candidate['id']}
                 if st.button('已选为设计方向' if selected else '选为设计方向', key=batch_id + candidate['id'], disabled=busy or historical or selected):
@@ -380,7 +384,16 @@ def demand_page(engine):
         historical = stale(run, brief) or brief['selection'] != run['selection']
         if historical:
             st.warning('此需求单对应历史条件或其他产品选择；导出仍保留原始资料和版本。')
-        st.markdown(export_markdown(run, brief))
+        if brief.get('format_version', 1) >= 2:
+            for i, (title, body, auxiliary) in enumerate(brief_sections(run, brief)):
+                if auxiliary:
+                    with st.expander(title, expanded=False):
+                        st.markdown(body)
+                else:
+                    st.markdown(('# ' if i == 0 else '## ') + title)
+                    st.markdown(body)
+        else:
+            st.markdown(export_markdown(run, brief))
         a, b = st.columns(2)
         a.download_button('下载 Markdown', export_markdown(run, brief), file_name=f"design-brief-v{brief['version']}.md", mime='text/markdown')
         b.download_button('下载 JSON', json.dumps(export_bundle(run, brief), ensure_ascii=False, indent=2), file_name=f"design-brief-v{brief['version']}.json", mime='application/json')

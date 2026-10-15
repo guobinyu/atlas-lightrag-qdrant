@@ -43,11 +43,15 @@ class DemandModel:
             value = {'groups': [{'title': '丝绸展览', 'source_ids': ['S1'], 'fit': '与丝巾工艺相关'}]}
         elif stage == 'DEMAND_CANDIDATES':
             value = {'candidates': [{'name': f'建议礼品{i}', 'form': '礼盒', 'audience': '校友', 'scene': '聚会', 'theme': '重逢',
-                'reason': '作为纪念', 'capability_fit': '符合包装能力，需验证', 'design': '年份主题', 'assumptions': ['需求待验证'],
+                'story': f'创意：以重逢的第{i}段记忆讲述校友情谊', 'visual_elements': '年份与校园剪影', 'reason': '作为纪念', 'capability_fit': '符合包装能力，需验证', 'design': '年份主题', 'assumptions': ['需求待验证'],
                 'questions': ['价格待确定'], 'facts': []} for i in range(data['count'])]}
         elif stage == 'DEMAND_BRIEF':
             value = {'title': '校友聚会产品需求单', **{k: '建议：' + v for k, v in BRIEF_FIELDS.items()},
                      'assumptions': ['为设计建议'], 'questions': ['价格待确认'], 'facts': []}
+            if '"followups"' in prompt:
+                value.pop('questions')
+                value['followups'] = [{'item': '品牌文件与参数文案', 'category': '资料补齐', 'owner': '商家',
+                                       'timing': '包装定稿前', 'approach': '概念稿先保留位置，收到确认文案后排版'}]
         else:
             raise AssertionError(stage)
         return json.dumps(value, ensure_ascii=False)

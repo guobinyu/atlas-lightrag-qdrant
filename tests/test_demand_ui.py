@@ -144,7 +144,8 @@ def test_legacy_over_limit_opens_confirmation(demand):
     app = page(demand)
     button(app, '查看并确认需求').click().run()
     assert not app.exception
-    assert any('最多 5 轮' in x.value for x in app.info)
+    assert any('请检查并确认需求摘要' in x.value for x in app.info)
+    assert not any('最多 5 轮' in x.value for x in [*app.info, *app.caption])
     assert not any(t.label == '补充说明／其他回答' for t in app.text_area)
     button(app, '确认需求并继续').click().run()
     assert not app.exception
@@ -194,3 +195,16 @@ def test_running_analysis_keeps_waiting_dialog_and_close_does_not_reopen(demand)
     button(app, '继续完善需求').click().run()
     assert not app.exception
     assert any(t.label == '补充说明／其他回答' for t in app.text_area)
+
+
+def test_v2_brief_auxiliary_sections_are_collapsed(demand):
+    run = selected(demand)
+    run, _ = start(demand, run, 'brief')
+    app = page(demand)
+    assert not app.exception
+    for label in ('必要假设与验证', '后续确认与交接安排', '参考资料与来源'):
+        section = next(e for e in app.expander if e.label == label)
+        assert not section.proto.expanded
+    assert any('文化故事：' in m.value for m in app.markdown)
+    assert any('推荐产品方案' in m.value for m in app.markdown)
+    assert len(app.get('download_button')) == 2
