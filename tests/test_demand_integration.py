@@ -29,5 +29,12 @@ def test_real_engine_empty_index_and_reload(tmp_path):
         reloaded = DemandService(work).load(run['id'])
         assert len(reloaded['briefs']) == 1
         assert reloaded['inputs'] == INPUT
+        result = work.start('demand_design_generate', {'run_id': run['id'], 'brief_id': reloaded['briefs'][0]['id']})[0].result(timeout=30)
+        assert result['status'] == 'success'
+        designed = work.demands.load(run['id'])
+        assert designed['design_versions'][0]['brief_snapshot'] == reloaded['briefs'][0]
+        assert designed['briefs'] == reloaded['briefs']
+        assert work.campaigns.runs() == []
+        assert not engine.gate.locked()
     finally:
         engine.close()

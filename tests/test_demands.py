@@ -64,6 +64,9 @@ class DemandModel:
                     {'meaning': '重逢', 'element': '校园剪影', 'placement': '标签', 'reason': '表达共同记忆'}]
                 value['deliverables'] = [{'name': '瓶身标签概念稿', 'priority': 'core', 'description': '校园剪影构图和配色'},
                                          {'name': '留言卡', 'priority': 'optional', 'description': '留白与手写区域设计'}]
+        elif stage == 'DEMAND_DESIGN':
+            from design_fixture import proposal
+            value = proposal(data)
         else:
             raise AssertionError(stage)
         return json.dumps(value, ensure_ascii=False)

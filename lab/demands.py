@@ -476,7 +476,8 @@ class DemandService:
             run['operations'][op['id']] = op
             self.save(run)
             return run, op
-        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise'):
+        from lab.demand_design import KINDS as DESIGN_KINDS, FORMAT_VERSION as DESIGN_FORMAT_VERSION
+        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise', *DESIGN_KINDS):
             raise ValueError('未知需求操作。')
         if kind != 'demand_analyze' and run['approved_revision'] != run['revision']:
             raise ValueError('请先按当前需求继续。')
@@ -493,6 +494,21 @@ class DemandService:
         if not isinstance(instruction, str) or len(instruction) > 4000:
             raise ValueError('修改意见需不超过 4000 字。')
         base = None
+        source_brief = None
+        if kind in DESIGN_KINDS:
+            brief_id = inputs.get('brief_id')
+            if kind == 'demand_design_revise':
+                base = next((v for v in run.get('design_versions', []) if v['id'] == inputs.get('design_id')), None)
+                if not base or not instruction.strip():
+                    raise ValueError('请选择设计方案并填写修改意见。')
+                brief_id = base['brief_id']
+            source_brief = next((b for b in run['briefs'] if b['id'] == brief_id), None)
+            if not source_brief or stale(run, source_brief) or source_brief['selection'] != run['selection']:
+                raise ValueError('请选择当前条件及产品方向下的需求单。')
+            if base and (stale(run, base) or base['selection'] != run['selection']):
+                raise ValueError('设计方案对应历史条件，请按当前需求重新生成。')
+            if base:
+                source_brief = base['brief_snapshot']
         if kind == 'demand_revise':
             base = next((b for b in run['briefs'] if b['id'] == inputs.get('brief_id')), None)
             if not base or stale(run, base) or base['selection'] != run['selection'] or not instruction.strip():
@@ -522,6 +538,9 @@ class DemandService:
               'count': count, 'instruction': instruction, 'base': deepcopy(base), 'cache': {}, 'responses': []}
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
+        if source_brief is not None:
+            op.update(design_format_version=DESIGN_FORMAT_VERSION, brief_snapshot=deepcopy(source_brief),
+                      input_snapshot=deepcopy(source_brief['summary']))
         if session is not None:
             session['operation_id'] = op['id']
         run['operations'][op['id']] = op
@@ -534,13 +553,13 @@ class DemandService:
         job.update(phase=stage)
         job.emit('demand.progress', {'message': stage})
 
-    async def ask(self, run, op, key, instruction, data, validate):
+    async def ask(self, run, op, key, instruction, data, validate, system_prompt=SYSTEM):
         if key in op['cache']:
             return deepcopy(op['cache'][key])
         previous = next((r for r in reversed(op['responses']) if r['stage'] == key and r.get('error')), None)
         if previous:
             data = {**data, 'previous_invalid_output': previous['raw'], 'validation_error_to_correct': previous['error']}
-        raw = await self.work.llm(instruction + '\n输入数据：\n' + json.dumps(data, ensure_ascii=False), system_prompt=SYSTEM)
+        raw = await self.work.llm(instruction + '\n输入数据：\n' + json.dumps(data, ensure_ascii=False), system_prompt=system_prompt)
         record = {'stage': key, 'at': utc_now(), 'raw': raw}
         op['responses'].append(record)
         try:
@@ -678,6 +697,21 @@ class DemandService:
                 run['clarifications'].append({**value, 'id': op['id'], 'revision': run['revision'], 'analysis_format_version': analysis_version})
         elif kind == 'demand_search':
             await self.discover(run, op, job)
+        elif kind in ('demand_design_generate', 'demand_design_revise'):
+            from lab import demand_design
+            if op['design_format_version'] != demand_design.FORMAT_VERSION:
+                raise ValueError('设计方案格式不支持，请保留历史并重新生成。')
+            brief = op['brief_snapshot']
+            self.checkpoint(run, op, job, '生成完整文字设计方案' if kind == 'demand_design_generate' else '修订文字设计方案')
+            value = await self.ask(run, op, 'design', demand_design.PROMPT,
+                demand_design.model_input(brief, op['base'], op['instruction']),
+                lambda v: demand_design.validate(v, brief), system_prompt=demand_design.SYSTEM)
+            versions = run.setdefault('design_versions', [])
+            if not any(v['id'] == op['id'] for v in versions):
+                versions.append({'id': op['id'], 'version': len(versions) + 1, 'content_version': op['design_format_version'],
+                    'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
+                    'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
+                    'instruction': op['instruction'], 'content': value})
         elif kind == 'demand_candidates':
             context = await self.context(run, op, job)
             self.checkpoint(run, op, job, '生成产品候选')

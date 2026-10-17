@@ -83,6 +83,8 @@ OP_TARGETS = {
     'demand_candidates': ('demand-candidates', '产品候选'),
     'demand_brief': ('demand-brief', '设计需求单'),
     'demand_revise': ('demand-revise', '需求单修订'),
+    'demand_design_generate': ('demand-design', '文字设计方案'),
+    'demand_design_revise': ('demand-design', '设计方案修订'),
 }
 
 
@@ -280,7 +282,7 @@ def demand_page(engine):
     busy = work.active is not None
     configured = work.llm.configured
     header('从生产能力，找到值得设计的产品', '明确需求、比较方向，把文化主题整理成设计方能使用的需求单。', 'ATLAS / PRODUCT EXPLORATION')
-    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单')
+    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 文字设计方案')
     if not configured:
         st.info('可以先保存需求；分析与生成前请在模型设置中配置连接。')
         st.link_button('打开模型设置', '/?view=settings')
@@ -442,10 +444,12 @@ def demand_page(engine):
     if st.button('生成设计需求单', type='primary', disabled=busy or not configured or not run['selection'] or not approved):
         launch(engine, 'demand_brief', identifier)
     step_feedback(engine, identifier, op, ('demand_brief',), 'brief')
+    selected_brief = None
     if run['briefs']:
         briefs = {b['id']: b for b in reversed(run['briefs'])}
         bid = st.selectbox('需求单版本', list(briefs), format_func=lambda k: f"版本 {briefs[k]['version']} · {briefs[k]['content']['title']}", key=prefix + 'brief-' + str(len(briefs)))
         brief = briefs[bid]
+        selected_brief = brief
         historical = stale(run, brief) or brief['selection'] != run['selection']
         if historical:
             st.warning('此需求单对应历史条件或其他产品选择；导出仍保留原始资料和版本。')
@@ -471,6 +475,7 @@ def demand_page(engine):
         if revise:
             launch(engine, 'demand_revise', identifier, brief_id=bid, instruction=revision)
         step_feedback(engine, identifier, op, ('demand_revise',), 'revise')
+    design_step(engine, run, selected_brief, op)
     with st.expander('需求与执行历史'):
         for summary in reversed(run['summaries']):
             st.write(f"需求版本 {summary['revision']} · {local_time(summary['at'])}")
@@ -486,3 +491,60 @@ def demand_page(engine):
                 if response.get('error'):
                     st.caption('输出检查未通过：' + response['error'])
     st.markdown('<div style="height:88px" aria-hidden="true"></div>', unsafe_allow_html=True)
+
+
+def design_step(engine, run, source_brief, op):
+    from lab import demand_design
+    work = engine.workbench
+    busy = work.active is not None
+    identifier = run['id']
+    st.subheader('5 · 设计方案', anchor='demand-design')
+    st.caption('直接生成完整文字提案，包含构图、配色、文案和逐项产品应用，可继续修订。')
+    valid_source = bool(source_brief and not stale(run, source_brief) and
+                        source_brief['selection'] == run['selection'] and run['approved_revision'] == run['revision'])
+    if source_brief:
+        st.write(f"来源需求单：版本 {source_brief['version']} · {source_brief['content']['title']}")
+        if not valid_source:
+            st.info('此来源对应历史条件或其他产品方向；请在上方选择当前有效需求单后生成。')
+    else:
+        st.info('先选择并生成一份设计需求单，再生成完整设计方案。')
+    if st.button('生成设计方案', type='primary', disabled=busy or not work.llm.configured or not valid_source):
+        launch(engine, 'demand_design_generate', identifier, brief_id=source_brief['id'])
+    step_feedback(engine, identifier, op, demand_design.KINDS, 'design')
+    versions = list(reversed(run.get('design_versions', [])))
+    if not versions:
+        return
+    source_id = source_brief['id'] if source_brief else 'none'
+    current = next((i for i, v in enumerate(versions) if v['brief_id'] == source_id), 0)
+    by_id = {v['id']: v for v in versions}
+    selected = st.selectbox('设计方案历史版本', list(by_id), index=current,
+        format_func=lambda k: f"设计版本 {by_id[k]['version']} · 来源需求单版本 {by_id[k]['brief_snapshot']['version']} · {by_id[k]['content']['title']}" + (' · 其他来源' if by_id[k]['brief_id'] != source_id else ''),
+        key=f"demand-design-history-{identifier}-{source_id}-{len(versions)}")
+    design = by_id[selected]
+    same_source = design['brief_id'] == source_id
+    historical = stale(run, design) or design['selection'] != run['selection']
+    if historical:
+        st.warning('此设计方案对应历史需求条件或其他产品方向；可查看和导出，不能直接修订。')
+    elif not same_source:
+        st.info('这是其他来源需求单的方案；如需修订，请在上方选择其来源需求单版本。')
+    content = demand_design.sections(run, design)
+    st.subheader(content[0][0])
+    st.caption(content[0][1])
+    tabs = st.tabs(['整体概念', '视觉设计', '产品应用与交付'])
+    for tab, (_, body, _) in zip(tabs, content[1:4]):
+        with tab:
+            st.markdown(body)
+    for title, body, _ in content[4:]:
+        with st.expander(title, expanded=False):
+            st.markdown(body)
+    prefix = f"demand-design-{identifier}-{design['id']}-"
+    with st.form(prefix + 'revise'):
+        instruction = st.text_area('设计方案修改意见', placeholder='例如：主色改为墨绿，保留故事，简化盒面构图。', max_chars=4000, disabled=busy)
+        revise = st.form_submit_button('生成设计方案新版本', disabled=busy or not work.llm.configured or historical or not same_source or not valid_source)
+    if revise:
+        launch(engine, 'demand_design_revise', identifier, design_id=design['id'], instruction=instruction)
+    a, b = st.columns(2)
+    a.download_button('下载设计方案 Markdown', demand_design.export_markdown(run, design),
+        file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.md", mime='text/markdown', key=prefix + 'md')
+    b.download_button('下载设计方案 JSON', json.dumps(demand_design.export_bundle(run, design), ensure_ascii=False, indent=2),
+        file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.json", mime='application/json', key=prefix + 'json')
