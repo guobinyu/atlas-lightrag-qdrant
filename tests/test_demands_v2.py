@@ -34,19 +34,19 @@ def test_confirm_binds_exploration_and_upstream_change_drops_it(demand):
     assert current['candidate_rounds'][-1] == old
 
 
-def test_v2_exports_complete_auxiliary_content_and_revisions(demand):
+def test_latest_exports_complete_auxiliary_content_and_revisions(demand):
     run = selected(demand)
-    assert run['candidate_rounds'][0]['format_version'] == 2
+    assert run['candidate_rounds'][0]['format_version'] == 3
     assert run['candidate_rounds'][0]['candidates'][0]['story']
     run, status = start(demand, run, 'brief')
     assert status['status'] == 'success'
     original = deepcopy(run['briefs'][0])
-    assert original['format_version'] == 2
+    assert original['format_version'] == 3
     md = export_markdown(run, original)
     expected = ['推荐产品方案', '文化主题与故事', '具体设计建议', '设计交付要求', '商家能力与硬性限制', '必要假设与验证', '后续确认与交接安排', '参考资料与来源']
     assert [md.index('## ' + label) for label in expected] == sorted(md.index('## ' + label) for label in expected)
     assert '商家' in md and '包装定稿前' in md and '概念稿先保留位置' in md
-    assert export_bundle(run, original)['schema_version'] == 2
+    assert export_bundle(run, original)['schema_version'] == 3
     assert export_bundle(run, original)['brief'] == original
     assert [title for title, _, aux in brief_sections(run, original) if aux][:2] == ['必要假设与验证', '后续确认与交接安排']
     run, status = start(demand, run, 'revise', brief_id=original['id'], instruction='简化视觉元素')
@@ -80,7 +80,7 @@ def test_legacy_retry_and_upgrade_keep_original(demand):
     assert export_bundle(run, original)['schema_version'] == 1
     run, status = start(demand, run, 'revise', brief_id=original['id'], instruction='整理成概念设计交接建议')
     assert status['status'] == 'success'
-    assert run['briefs'][-1]['format_version'] == 2
+    assert run['briefs'][-1]['format_version'] == 3
     assert run['briefs'][0] == original
     assert export_markdown(run, original) == before
 

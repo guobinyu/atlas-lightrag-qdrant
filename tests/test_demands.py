@@ -9,7 +9,7 @@ from test_campaigns import work, NOW, TEXT
 from lab.demands import DemandService, stale, export_bundle, export_markdown, BRIEF_FIELDS
 
 INPUT = {'request': '为校友聚会探索黄酒礼品', 'industry': '黄酒', 'capabilities': '黄酒酿造和礼盒包装',
-         'brand': '', 'constraints': '不生产服饰', 'audience': '校友', 'scene': '聚会', 'theme': '', 'path': 'custom', 'days': 7}
+         'brand': '', 'constraints': '不生产服饰', 'audience': '校友', 'scene': '聚会', 'purpose': '', 'theme': '', 'path': 'custom', 'days': 7}
 
 
 class DemandModel:
@@ -35,6 +35,8 @@ class DemandModel:
             return '{invalid'
         if stage == 'DEMAND_ANALYZE':
             value = {'known': ['用户可以生产黄酒'], 'unknown': ['价格未定'], 'questions': ['面向哪个价格区间？']}
+            if '"recommendations"' in prompt:
+                value['recommendations'] = {}
         elif stage == 'DEMAND_SEARCH':
             value = {'queries': ['丝绸近期展览']}
         elif stage == 'DEMAND_EXTRACT':
@@ -45,6 +47,11 @@ class DemandModel:
             value = {'candidates': [{'name': f'建议礼品{i}', 'form': '礼盒', 'audience': '校友', 'scene': '聚会', 'theme': '重逢',
                 'story': f'创意：以重逢的第{i}段记忆讲述校友情谊', 'visual_elements': '年份与校园剪影', 'reason': '作为纪念', 'capability_fit': '符合包装能力，需验证', 'design': '年份主题', 'assumptions': ['需求待验证'],
                 'questions': ['价格待确定'], 'facts': []} for i in range(data['count'])]}
+            if '"story_mapping"' in prompt:
+                for i, item in enumerate(value['candidates']):
+                    item.update(purpose=data['summary']['inputs'].get('purpose') or '重逢纪念', differentiator=f'第{i}段共同记忆的互动',
+                                capability_gaps=['新盒型需确认'], story_mapping=[{'meaning': '重逢', 'element': f'第{i}幅校园剪影',
+                                                                            'placement': '标签与盒面', 'reason': '表达共同记忆'}])
         elif stage == 'DEMAND_BRIEF':
             value = {'title': '校友聚会产品需求单', **{k: '建议：' + v for k, v in BRIEF_FIELDS.items()},
                      'assumptions': ['为设计建议'], 'questions': ['价格待确认'], 'facts': []}
@@ -52,6 +59,11 @@ class DemandModel:
                 value.pop('questions')
                 value['followups'] = [{'item': '品牌文件与参数文案', 'category': '资料补齐', 'owner': '商家',
                                        'timing': '包装定稿前', 'approach': '概念稿先保留位置，收到确认文案后排版'}]
+            if '"story_mapping"' in prompt:
+                value['story_mapping'] = data['candidate'].get('story_mapping') or [
+                    {'meaning': '重逢', 'element': '校园剪影', 'placement': '标签', 'reason': '表达共同记忆'}]
+                value['deliverables'] = [{'name': '瓶身标签概念稿', 'priority': 'core', 'description': '校园剪影构图和配色'},
+                                         {'name': '留言卡', 'priority': 'optional', 'description': '留白与手写区域设计'}]
         else:
             raise AssertionError(stage)
         return json.dumps(value, ensure_ascii=False)
@@ -374,7 +386,7 @@ def test_clarification_five_round_limit_and_final_retry(demand):
             if self.bad:
                 return '{invalid'
             self.calls.append(prompt)
-            return json.dumps({'known': ['已知能力'], 'unknown': ['预算待探索'],
+            return json.dumps({'known': ['已知能力'], 'unknown': ['预算待探索'], 'recommendations': {},
                                'questions': [{'text': f'问题{len(self.calls)}', 'options': ['选项']}]})
     demand.llm = PersistentModel(demand.llm)
     run, _ = start(demand, run, 'analyze')
@@ -392,10 +404,10 @@ def test_clarification_five_round_limit_and_final_retry(demand):
     assert len(clarification_rounds(run)) == 5
     assert run['clarifications'][-1]['questions'] == []
     assert '问题6' in run['clarifications'][-1]['unknown']
-    with pytest.raises(ValueError, match='最多 5 轮'):
+    with pytest.raises(ValueError, match='直接确认需求'):
         start(demand, run, 'analyze')
     service.update(run['id'], {**INPUT, 'audience': '新用户'})
-    with pytest.raises(ValueError, match='最多 5 轮'):
+    with pytest.raises(ValueError, match='直接确认需求'):
         start(demand, run, 'analyze')
     current = service.load(run['id'])
     service.confirm(run['id'], current['inputs'], current['revision'])

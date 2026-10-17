@@ -1,9 +1,10 @@
 """A staged product exploration UI; ordinary editing never calls the model."""
 import json
+from copy import deepcopy
 from html import escape
 import streamlit as st
 
-from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections
+from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, clean_inputs, adoption_value, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections, candidate_comparison, mapping_markdown
 from lab.campaign_ui import local_time
 
 PATHS = {'trend': '结合近期话题', 'custom': '人群／场景定制'}
@@ -38,7 +39,7 @@ def input_form(values, prefix, disabled=False):
     a, b = st.columns(2)
     result['path'] = a.selectbox('探索路径', list(PATHS), index=list(PATHS).index(values.get('path', 'trend')), format_func=PATHS.get, key=prefix + 'path', disabled=disabled)
     result['days'] = b.selectbox('话题搜索时间范围（仅近期话题路径使用）', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
-    for key in ('audience', 'scene', 'theme'):
+    for key in ('audience', 'scene', 'purpose', 'theme'):
         result[key] = st.text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
     st.caption('定制路径至少填写目标人群、使用场景或文化主题中的一项。品牌未填写时保留为“未提供”。')
     return result
@@ -71,6 +72,9 @@ def open_dialog(identifier, stage):
 def close_dialog():
     st.session_state.pop('demand-dialog', None)
     st.session_state.pop('demand-await', None)
+    for key in list(st.session_state):
+        if key.startswith('demand-confirm-'):
+            del st.session_state[key]
 
 
 OP_TARGETS = {
@@ -194,28 +198,78 @@ def clarification_dialog(engine, identifier, stage):
         if st.button('按当前需求继续'):
             open_dialog(identifier, 'confirm')
         return
+    confirmation_view(engine, run, analysis)
+
+
+def adopt_to_draft(prefix, analysis, kind, field):
+    draft = st.session_state[prefix + 'draft']
+    if draft['invalidated']:
+        return
+    value = adoption_value(analysis, kind, field)
+    st.session_state[prefix + field] = value
+    draft['adoptions'] = [a for a in draft['adoptions'] if a['field'] != field]
+    draft['adoptions'].append({'analysis_id': analysis['id'], 'kind': kind, 'field': field})
+    draft['expected'][field] = value
+
+
+def confirmation_view(engine, run, analysis):
+    service = engine.workbench.demands
+    identifier = run['id']
+    prefix = f"demand-confirm-{identifier}-{run['revision']}-"
+    draft = st.session_state.setdefault(prefix + 'draft', {
+        'expected': clean_inputs(run['inputs']), 'adoptions': [], 'invalidated': False})
     st.write('确认需求摘要')
+    st.caption('采用到摘要仅修改当前草稿；点击确认后才保存。关闭窗口不会批准需求，未确认草稿不保留。')
     if len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS:
         st.info('请检查并确认需求摘要，未明确的内容保留为待探索项。')
-    st.caption('以下字段以已保存资料为准。模型建议单独展示，请按需要自行填写；点击确认才会进入后续流程。')
-    if analysis:
-        st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
-        for field, value in analysis.get('suggestions', {}).items():
-            st.info(FIELDS[field] + '（待确认建议）：' + value)
-    with st.expander('已保存的补充回答'):
+    with st.expander('用户已提供内容'):
+        for field, label in FIELDS.items():
+            st.write(f"{label}：{run['inputs'].get(field) or '未提供'}")
         for question, answer in service.draft_answers(run).items():
             st.write(question + '：' + answer)
-    with st.form(f"demand-confirm-{identifier}-{run['revision']}"):
-        values = input_form(run['inputs'], f"demand-confirm-{identifier}-{run['revision']}-")
-        confirm = st.form_submit_button('确认需求并继续', type='primary')
-    if confirm:
-        ok, updated = action(engine, service.confirm, identifier, values, run['revision'])
+    st.write('可编辑需求摘要')
+    values = input_form(run['inputs'], prefix)
+    # These widgets are deliberately outside a form: edits must invalidate old
+    # recommendations before another recommendation can be adopted.
+    if clean_inputs(values) != draft['expected']:
+        draft['invalidated'] = True
+        draft['adoptions'] = []
+    answers_changed = service.draft_answers(run) != run['summaries'][-1]['answers']
+    applicable = bool(analysis and analysis['revision'] == run['revision'] and not draft['invalidated'] and not answers_changed)
+    if analysis:
+        if not applicable:
+            st.info('需求或回答已改变，以下为原分析记录，不能继续采纳。可直接确认当前摘要，或根据最新资料重新分析。')
+        for kind, title in [('suggestions', '系统整理的需求理解'), ('recommendations', '系统推荐的探索方向')]:
+            st.write(title)
+            items = analysis.get(kind, {})
+            if not items:
+                st.caption('暂无需要采纳的内容。')
+            for field, item in items.items():
+                value = adoption_value(analysis, kind, field)
+                st.write(f"{FIELDS[field]}：{value}")
+                if kind == 'recommendations':
+                    st.caption('建议理由：' + item['reason'])
+                adopted = any(a['field'] == field and a['kind'] == kind for a in draft['adoptions'])
+                st.button('已采用到草稿' if adopted else '采用到摘要', key=prefix + kind + '-' + field,
+                          disabled=not applicable or adopted, on_click=adopt_to_draft,
+                          args=(prefix, analysis, kind, field))
+        st.write('仍待探索内容（原分析记录）' if not applicable else '仍待探索内容')
+        st.write('；'.join(analysis['unknown']) or '暂无')
+    st.caption('部分条件暂不确定仍可继续；设计细节由后续产品建议展开。')
+    if st.button('确认需求并继续', type='primary'):
+        ok, updated = action(engine, service.confirm, identifier, values, run['revision'], draft['adoptions'])
         if ok:
             close_dialog()
             if updated['inputs']['path'] == 'trend' and not updated['research_id']:
                 launch(engine, 'demand_search', identifier)
             st.rerun()
+    if len(clarification_rounds(run)) < MAX_CLARIFICATION_ROUNDS and st.button('保存摘要并重新分析'):
+        ok, _ = action(engine, service.update, identifier, values, service.draft_answers(run))
+        if ok:
+            close_dialog()
+            analyze_dialog(engine, identifier)
     if can_answer(run, analysis) and st.button('返回补充问题'):
+        close_dialog()
         open_dialog(identifier, 'questions')
 
 
@@ -274,7 +328,7 @@ def demand_page(engine):
     analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
     st.caption('当前阶段：' + ('需求已确认' if run['approved_revision'] == run['revision'] else '完善需求中'))
     for field, label in FIELDS.items():
-        st.write(f"{label}：{run['inputs'][field] or '未提供'}")
+        st.write(f"{label}：{run['inputs'].get(field) or '未提供'}")
     if analysis:
         st.write('模型理解（建议）：' + '；'.join(analysis['known']))
         st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
@@ -351,15 +405,26 @@ def demand_page(engine):
             st.warning('这轮候选与当前条件不一致，可查看，不能直接用于当前设计需求单。')
         if batch['context']['knowledge_missing']:
             st.info('未检索到相关本地知识。产品方向为策划建议，不代表获得专业知识库支持。')
+        if batch.get('format_version', 1) >= 3:
+            st.write('本轮方案对比')
+            st.table(candidate_comparison(batch))
+            st.caption('选择表示认可产品方向；容量、材料和工艺等细节仍按建议及后续确认处理。')
         labels = {'form': '产品形态', 'audience': '目标人群', 'scene': '使用场景', 'theme': '文化主题', 'reason': '需求与推荐理由', 'capability_fit': '能力匹配判断', 'design': '差异化设计建议'}
         for candidate in batch['candidates']:
             with st.container(border=True):
                 st.write('**' + candidate['name'] + '**')
                 for field, label in labels.items():
                     st.write(f"{label}：{candidate[field]}")
+                if batch.get('format_version', 1) >= 3:
+                    st.write('核心用途：' + candidate['purpose'])
+                    st.write('主要区别：' + candidate['differentiator'])
+                    st.write('需确认能力：' + ('；'.join(candidate['capability_gaps']) or '未列出额外能力缺口，方案细节仍需验证'))
                 if batch.get('format_version', 1) >= 2:
                     st.write('文化故事：' + candidate['story'])
                     st.write('视觉元素：' + candidate['visual_elements'])
+                if batch.get('format_version', 1) >= 3:
+                    with st.expander('故事到设计的对应（策划建议）'):
+                        st.markdown(mapping_markdown(candidate['story_mapping']))
                 with st.expander('必要假设与关键未知'):
                     st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
                     st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
@@ -410,7 +475,7 @@ def demand_page(engine):
         for summary in reversed(run['summaries']):
             st.write(f"需求版本 {summary['revision']} · {local_time(summary['at'])}")
             for key, label in FIELDS.items():
-                st.caption(f"{label}：{summary['inputs'][key] or '未提供'}")
+                st.caption(f"{label}：{summary['inputs'].get(key) or '未提供'}")
             for question, answer in summary['answers'].items():
                 st.write(question + '：' + answer)
         for item in reversed(operations):
