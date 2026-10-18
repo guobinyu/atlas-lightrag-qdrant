@@ -1,10 +1,12 @@
 """Full demand flow uses real Engine and empty Qdrant without nested locks."""
 from lab.config import ROOT, Settings
 from lab.engine import Engine
-from test_demands import DemandModel, INPUT
+from test_demands import DemandModel, INPUT, NOW, TEXT
 
 
-def test_real_engine_empty_index_and_reload(tmp_path):
+def test_real_engine_empty_index_and_reload(tmp_path, monkeypatch):
+    monkeypatch.setattr('lab.demands.search_web', lambda *a: [{'url': 'https://example.com/story', 'title': '展览'}])
+    monkeypatch.setattr('lab.demands.fetch_source', lambda url, title: {'url': url, 'title': title, 'text': TEXT, 'collected_at': NOW})
     (tmp_path / 'models').symlink_to(ROOT / 'data/models', target_is_directory=True)
     engine = Engine(Settings(data_dir=tmp_path, workspace='demand_engine_fixture', seed_demo=False))
     try:

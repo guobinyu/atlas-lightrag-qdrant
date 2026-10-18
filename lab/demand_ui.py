@@ -7,7 +7,7 @@ import streamlit as st
 from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, clean_inputs, adoption_value, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections, candidate_comparison, mapping_markdown
 from lab.campaign_ui import local_time
 
-PATHS = {'trend': '结合近期话题', 'custom': '人群／场景定制'}
+PATHS = {'trend': '结合近期热点', 'custom': '人群／场景定制'}
 STATES = {'running': '执行中', 'success': '已完成', 'failed': '失败', 'interrupted': '已中断'}
 
 
@@ -38,10 +38,12 @@ def input_form(values, prefix, disabled=False):
     result['constraints'] = st.text_area('已知限制（选填）', value=values.get('constraints', ''), placeholder='材料、工艺、价格范围和不能做的产品。', key=prefix + 'constraints', max_chars=4000, disabled=disabled)
     a, b = st.columns(2)
     result['path'] = a.selectbox('探索路径', list(PATHS), index=list(PATHS).index(values.get('path', 'trend')), format_func=PATHS.get, key=prefix + 'path', disabled=disabled)
-    result['days'] = b.selectbox('话题搜索时间范围（仅近期话题路径使用）', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
+    result['days'] = b.selectbox('热点搜索时间范围', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
     for key in ('audience', 'scene', 'purpose', 'theme'):
-        result[key] = st.text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
-    st.caption('定制路径至少填写目标人群、使用场景或文化主题中的一项。品牌未填写时保留为“未提供”。')
+        result[key] = (st.text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
+                       if result['path'] == 'custom' else values.get(key, ''))
+    if result['path'] == 'custom':
+        st.caption('定制路径至少填写目标人群、使用场景或文化主题中的一项。品牌未填写时保留为“未提供”。')
     return result
 
 
@@ -303,9 +305,8 @@ def demand_page(engine):
                     st.session_state['demand-new-' + key] = value
                 st.session_state['demand-new-merchant'] = service.merchant(copy_id)
                 st.rerun()
-        with st.form('demand-create'):
-            values = input_form(copied, 'demand-new-', busy)
-            submitted = st.form_submit_button('保存新任务', type='primary', disabled=busy)
+        values = input_form(copied, 'demand-new-', busy)
+        submitted = st.button('保存新任务', type='primary', disabled=busy)
         if submitted:
             ok, created = action(engine, service.create, values)
             if ok:
@@ -364,33 +365,32 @@ def demand_page(engine):
     if not approved:
         st.info('请先保存并按当前需求继续；历史成果仍可在下方查看。')
     research = next((r for r in run['research'] if r['id'] == run['research_id']), None)
-    if run['inputs']['path'] == 'trend':
-        st.caption('公开搜索发现近期话题；时间已核验不等于热度已验证。')
-        if approved and st.button('重新搜索话题', disabled=busy or not configured):
-            launch(engine, 'demand_search', identifier)
-        step_feedback(engine, identifier, op, ('demand_search',), 'research')
-        if research:
-            for topic in research['topics']:
-                with st.container(border=True):
-                    st.write('**' + topic['title'] + '**')
-                    st.caption(('时间已核验' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作为文化参考') + ' · 热度未验证')
-                    st.write(topic['fit'])
-                    with st.expander('话题来源与日期依据'):
-                        for sid in topic['source_ids']:
-                            date = research['extractions'][sid]['date']
-                            st.caption(f"[{sid}] 发布时间：{local_time(date.get('published_at'), date.get('published_precision'))} · 事件时间：{local_time(date.get('event_at'), date.get('event_precision'))}")
-                            st.write(date['reason'])
-                            for item in date['evidence']:
-                                st.text(item['quote'])
-                        evidence_view({s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']})
-                    if st.button('已选择' if topic['id'] == run['topic_id'] else '选择此话题', key=prefix + research['id'] + topic['id'], disabled=busy or topic['id'] == run['topic_id']):
-                        ok, _ = action(engine, service.select_topic, identifier, topic['id'])
-                        if ok:
-                            st.rerun()
-            for issue in research['issues']:
-                st.caption(issue)
-    else:
-        st.caption('根据人群、场景和文化主题检索本地文本，不执行热点搜索。点击生成候选时准备资料。')
+    if run['inputs']['path'] == 'custom':
+        st.caption('围绕目标人群、场景和用途搜索近期热点，并结合本地文化资料。未选择话题时，生成候选会使用首个推荐话题；无可用正文时提示重试。')
+    st.caption('公开搜索发现近期话题；时间已核验不等于热度已验证。')
+    if approved and st.button('重新搜索话题', disabled=busy or not configured):
+        launch(engine, 'demand_search', identifier)
+    step_feedback(engine, identifier, op, ('demand_search',), 'research')
+    if research:
+        for topic in research['topics']:
+            with st.container(border=True):
+                st.write('**' + topic['title'] + '**')
+                st.caption(('时间已核验' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作为文化参考') + ' · 热度未验证')
+                st.write(topic['fit'])
+                with st.expander('话题来源与日期依据'):
+                    for sid in topic['source_ids']:
+                        date = research['extractions'][sid]['date']
+                        st.caption(f"[{sid}] 发布时间：{local_time(date.get('published_at'), date.get('published_precision'))} · 事件时间：{local_time(date.get('event_at'), date.get('event_precision'))}")
+                        st.write(date['reason'])
+                        for item in date['evidence']:
+                            st.text(item['quote'])
+                    evidence_view({s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']})
+                if st.button('已选择' if topic['id'] == run['topic_id'] else '选择此话题', key=prefix + research['id'] + topic['id'], disabled=busy or topic['id'] == run['topic_id']):
+                    ok, _ = action(engine, service.select_topic, identifier, topic['id'])
+                    if ok:
+                        st.rerun()
+        for issue in research['issues']:
+            st.caption(issue)
     st.subheader('3 · 比较产品候选', anchor='demand-candidates')
     can_generate = approved and (run['inputs']['path'] == 'custom' or bool(run['topic_id']))
     with st.form(prefix + 'generate'):
@@ -547,6 +547,12 @@ def design_step(engine, run, source_brief, op):
         revise = st.form_submit_button('生成设计方案新版本', disabled=busy or not work.llm.configured or historical or not same_source or not valid_source)
     if revise:
         launch(engine, 'demand_design_revise', identifier, design_id=design['id'], instruction=instruction, include_images=work.images.configured)
+    from lab.design_pdf import export_pdf
+    pdf_run, pdf_design = deepcopy(run), deepcopy(design)
+    st.download_button('导出设计方案 PDF', lambda: export_pdf(work.demands, pdf_run, pdf_design),
+        file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.pdf", mime='application/pdf',
+        key=prefix + 'pdf', on_click='ignore',
+        help='包含当前设计版本的完整文字与已保存图稿，标注选用状态；不调用模型。')
     a, b = st.columns(2)
     a.download_button('下载设计方案 Markdown', demand_design.export_markdown(run, design),
         file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.md", mime='text/markdown', key=prefix + 'md')

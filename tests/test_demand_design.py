@@ -173,7 +173,7 @@ def test_design_ui_generation_revision_sources_and_export(demand):
     app.run()
     assert not app.exception
     assert [t.label for t in app.tabs] == ['整体概念', '视觉设计', '产品应用与交付']
-    assert len(app.get('download_button')) == 4
+    assert len(app.get('download_button')) == 5
 
     assert not next(e for e in app.expander if e.label == '已确认条件与设计假设').proto.expanded
     next(t for t in app.text_area if t.label == '设计方案修改意见').input('主色改为墨绿')
@@ -191,7 +191,7 @@ def test_design_ui_generation_revision_sources_and_export(demand):
     assert not app.exception
     assert button(app, '生成设计方案').disabled
     assert button(app, '生成设计方案新版本').disabled
-    assert len(app.get('download_button')) == 4
+    assert len(app.get('download_button')) == 5
 
 
 def test_design_facts_can_only_use_frozen_source_and_other_tasks_are_rejected(demand):

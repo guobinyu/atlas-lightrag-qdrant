@@ -30,10 +30,12 @@ def wait(work):
 def test_create_edit_continue_generate_and_export(demand):
     app = page(demand)
     assert not app.exception
+    app.selectbox(key='demand-new-path').select(INPUT['path']).run()
     for field, value in INPUT.items():
         key = 'demand-new-' + field
         if field in ('path', 'days'):
-            app.selectbox(key=key).select(value)
+            if not app.selectbox(key=key).disabled:
+                app.selectbox(key=key).select(value)
         elif field in ('request', 'capabilities', 'constraints'):
             app.text_area(key=key).input(value)
         else:
@@ -95,6 +97,8 @@ def test_copy_merchant_is_explicit_and_does_not_copy_request(demand):
     assert not app.exception
     assert app.text_area(key='demand-new-capabilities').value == INPUT['capabilities']
     assert app.text_area(key='demand-new-request').value == ''
+    assert not any(w.key == 'demand-new-audience' for w in app.text_input)
+    app.selectbox(key='demand-new-path').select('custom').run()
     assert app.text_input(key='demand-new-audience').value == ''
 
 

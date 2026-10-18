@@ -104,16 +104,15 @@ def selected(work):
     return work.demands.load(run['id'])
 
 
-def test_custom_never_searches_and_preserves_user_facts(demand, monkeypatch):
-    def forbidden(*args):
-        raise AssertionError('定制流程不应搜索网页')
-    monkeypatch.setattr('lab.demands.search_web', forbidden)
+def test_custom_searches_hotspots_and_preserves_user_facts(demand):
     run = candidates(demand)
     assert run['inputs'] == INPUT
     assert run['inputs']['brand'] == ''
     assert run['candidate_rounds'][0]['context']['knowledge_missing']
     assert len(run['candidate_rounds'][0]['candidates']) == 3
-    assert demand.llm.calls == ['DEMAND_CANDIDATES']
+    assert demand.llm.calls == ['DEMAND_SEARCH', 'DEMAND_EXTRACT', 'DEMAND_GROUP', 'DEMAND_CANDIDATES']
+    assert run['candidate_rounds'][0]['context']['topic']
+    assert 'S1' in run['candidate_rounds'][0]['context']['evidence']
 
 
 def test_clarify_answers_and_explicit_continue(demand):
@@ -185,7 +184,7 @@ def test_invalid_response_retry_reuses_completed_knowledge(demand):
     assert status['status'] == 'failed'
     assert not run['candidate_rounds']
     op = list(run['operations'].values())[-1]
-    assert op['responses'][0]['error']
+    assert op['responses'][-1]['error']
     demand.llm.bad = None
     run, status = start(demand, run, 'retry', operation_id=op['id'])
     assert status['status'] == 'success' and len(calls) == 1
@@ -201,7 +200,7 @@ def test_retrieval_failure_is_not_empty_knowledge(demand):
     run, status = start(demand, run, 'candidates')
     assert status['status'] == 'failed'
     assert 'TEST_CAMPAIGN_SECRET' not in status['message']
-    assert not demand.llm.calls
+    assert 'DEMAND_CANDIDATES' not in demand.llm.calls
 
 
 def test_brief_revision_exports_and_old_versions(demand):
@@ -278,7 +277,7 @@ def test_interrupt_preserves_checkpoint_and_requires_explicit_retry(demand):
     demand.demands.interrupt()
     run = demand.demands.load(run['id'])
     assert run['operations'][op['id']]['status'] == 'interrupted'
-    assert not demand.llm.calls
+    assert 'DEMAND_CANDIDATES' not in demand.llm.calls
     run, status = start(demand, run, 'retry', operation_id=op['id'])
     assert status['status'] == 'success'
 
@@ -415,3 +414,27 @@ def test_clarification_five_round_limit_and_final_retry(demand):
     current = service.load(run['id'])
     service.confirm(run['id'], current['inputs'], current['revision'])
     assert service.load(run['id'])['approved_revision'] == current['revision']
+
+
+def test_custom_selected_topic_is_used_without_duplicate_search(demand):
+    run = demand.demands.create(INPUT)
+    demand.demands.approve(run['id'])
+    run, status = start(demand, run, 'search')
+    assert status['status'] == 'success'
+    topic = run['research'][0]['topics'][0]
+    demand.demands.select_topic(run['id'], topic['id'])
+    run, status = start(demand, run, 'candidates')
+    assert status['status'] == 'success'
+    assert demand.llm.calls.count('DEMAND_SEARCH') == 1
+    assert run['candidate_rounds'][0]['context']['topic']['id'] == topic['id']
+    assert run['inputs'] == INPUT
+
+
+def test_custom_empty_search_stops_candidates(demand, monkeypatch):
+    monkeypatch.setattr('lab.demands.search_web', lambda *a: [])
+    run = demand.demands.create(INPUT)
+    demand.demands.approve(run['id'])
+    run, status = start(demand, run, 'candidates')
+    assert status['status'] == 'failed'
+    assert not run['candidate_rounds']
+    assert 'DEMAND_CANDIDATES' not in demand.llm.calls

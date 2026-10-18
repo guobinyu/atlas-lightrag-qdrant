@@ -482,8 +482,6 @@ class DemandService:
             raise ValueError('未知需求操作。')
         if kind != 'demand_analyze' and run['approved_revision'] != run['revision']:
             raise ValueError('请先按当前需求继续。')
-        if kind == 'demand_search' and run['inputs']['path'] != 'trend':
-            raise ValueError('定制路径不执行热点搜索。')
         if kind == 'demand_candidates' and run['inputs']['path'] == 'trend' and not run['topic_id']:
             raise ValueError('请先选择话题。')
         if kind in ('demand_brief', 'demand_revise') and not run['selection']:
@@ -594,7 +592,7 @@ class DemandService:
             if not v['queries'] or any(not 2 <= len(q.strip()) <= 300 for q in v['queries']):
                 raise ValueError('需要 1–3 个有效检索词。')
         self.checkpoint(run, op, job, '规划近期话题检索')
-        queries = await self.ask(run, op, 'queries', 'DEMAND_SEARCH：结合商家能力、需求和时间范围，生成最多三个近期话题检索词。返回 {"queries":["检索词"]}。',
+        queries = await self.ask(run, op, 'queries', 'DEMAND_SEARCH：结合商家能力、需求和时间范围，生成最多三个近期热点检索词。人群／场景定制须围绕已确认的目标人群、使用场景、核心用途与文化主题检索，不得用热点替换这些条件。返回 {"queries":["检索词"]}。',
                                  {'summary': op['input_snapshot'], 'as_of': research['at']}, check_queries)
         self.checkpoint(run, op, job, '搜集话题正文')
         for query in dict.fromkeys(queries['queries']):
@@ -629,7 +627,7 @@ class DemandService:
             seen.add(url)
             self.save(run)
         if not research['sources']:
-            raise ValueError('没有取得可用正文。可重试、重新搜索，或编辑需求改走定制路径。')
+            raise ValueError('没有取得可用正文。可重试、重新搜索，或调整检索条件；不能在没有来源时编造热点。')
         self.checkpoint(run, op, job, '提取话题并核验日期')
         for source in research['sources']:
             key = source['id']
@@ -653,7 +651,7 @@ class DemandService:
                     raise ValueError('话题引用未知或重复来源。')
                 assigned.update(ids)
         grouped = await self.ask(run, op, 'groups',
-            'DEMAND_GROUP：聚合同一事件，返回 {"groups":[{"title":"话题","source_ids":["S1"],"fit":"与商家能力的关联理由（判断）"}]}。最多五个，优先时间已核验且与能力相关，不得引入输入外来源，每来源至多一组。',
+            'DEMAND_GROUP：聚合同一事件，返回 {"groups":[{"title":"话题","source_ids":["S1"],"fit":"与商家能力的关联理由（判断）"}]}。最多五个，优先时间已核验且与能力、人群、场景和用途相关，在 fit 中说明结合方式，不得引入输入外来源，每来源至多一组。',
             {'summary': op['input_snapshot'], 'events': research['extractions']}, check_groups)
         research['topics'] = [{**g, 'id': 'T' + str(i), **topic_dates(research['extractions'], g['source_ids']), 'heat': '热度未验证'} for i, g in enumerate(grouped['groups'], 1)]
         if not any(r['id'] == research['id'] for r in run['research']):
@@ -666,7 +664,15 @@ class DemandService:
         if 'context' in op['cache']:
             return op['cache']['context']
         evidence, topic = {}, None
-        if run['inputs']['path'] == 'trend':
+        if run['inputs']['path'] == 'custom' and not run['topic_id']:
+            if not run['research_id']:
+                await self.discover(run, op, job)
+            research = next(r for r in run['research'] if r['id'] == run['research_id'])
+            # Custom exploration may use the first suggested topic unless the user selects one.
+            run['topic_id'] = research['topics'][0]['id']
+            op['binding'] = binding(run)
+            self.save(run)
+        if run['topic_id']:
             research = next(r for r in run['research'] if r['id'] == run['research_id'])
             topic = next(t for t in research['topics'] if t['id'] == run['topic_id'])
             evidence = {s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']}

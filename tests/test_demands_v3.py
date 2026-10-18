@@ -107,6 +107,8 @@ def test_invalid_v3_output_is_not_published_and_can_retry(demand, kind, problem)
         settings, configured = previous.settings, True
         async def __call__(self, prompt, **kwargs):
             result = json.loads(await previous(prompt, **kwargs))
+            if not prompt.startswith('DEMAND_' + kind.upper() + '：'):
+                return json.dumps(result)
             item = result['candidates'][0] if kind == 'candidates' else result
             if problem == 'empty_mapping':
                 item['story_mapping'] = []
