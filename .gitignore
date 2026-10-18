@@ -6,6 +6,7 @@ venv/
 !.env.example
 .streamlit/secrets.toml
 llm-settings.json
+image-settings.json
 *.pem
 *.key
 

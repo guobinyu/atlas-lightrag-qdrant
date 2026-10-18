@@ -99,6 +99,8 @@ def work(tmp_path, monkeypatch):
     instance.job_dir.mkdir()
     instance.active = None
     instance.llm = Model()
+    from lab.image_service import ImageService
+    instance.images = ImageService(tmp_path / "image-settings.json")
     instance.campaigns = CampaignService(instance)
     engine.workbench = instance
     yield instance

@@ -83,6 +83,8 @@ OP_TARGETS = {
     'demand_candidates': ('demand-candidates', '产品候选'),
     'demand_brief': ('demand-brief', '设计需求单'),
     'demand_revise': ('demand-revise', '需求单修订'),
+    'demand_image_generate': ('demand-images', '设计图稿'),
+    'demand_image_revise': ('demand-images', '图稿修改'),
     'demand_design_generate': ('demand-design', '文字设计方案'),
     'demand_design_revise': ('demand-design', '设计方案修订'),
 }
@@ -282,7 +284,7 @@ def demand_page(engine):
     busy = work.active is not None
     configured = work.llm.configured
     header('从生产能力，找到值得设计的产品', '明确需求、比较方向，把文化主题整理成设计方能使用的需求单。', 'ATLAS / PRODUCT EXPLORATION')
-    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 文字设计方案')
+    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 文字设计方案 → 设计图稿')
     if not configured:
         st.info('可以先保存需求；分析与生成前请在模型设置中配置连接。')
         st.link_button('打开模型设置', '/?view=settings')
@@ -548,3 +550,63 @@ def design_step(engine, run, source_brief, op):
         file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.md", mime='text/markdown', key=prefix + 'md')
     b.download_button('下载设计方案 JSON', json.dumps(demand_design.export_bundle(run, design), ensure_ascii=False, indent=2),
         file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.json", mime='application/json', key=prefix + 'json')
+    image_step(engine, run, design, valid_source and same_source and not historical, op)
+
+
+def image_step(engine, run, design, valid_source, op):
+    from lab import demand_images
+    from lab.image_service import image_sizes
+    work = engine.workbench
+    busy = work.active is not None
+    enabled = valid_source and work.images.configured and not busy
+    st.subheader('6 · 设计图稿', anchor='demand-images')
+    st.caption('平面概念稿，供设计讨论；像素尺寸不代表生产尺寸。修改图稿不改写文字方案。')
+    st.caption(f"来源：设计版本 {design['version']} · {design['content']['title']}")
+    if not work.images.configured:
+        st.info('请在模型设置中独立配置图片服务，文字功能仍可使用。')
+        st.link_button('配置图片模型', '/?view=settings')
+    apps = design['content']['applications']
+    prefix = f"demand-image-{run['id']}-{design['id']}-"
+    index = st.selectbox('图稿设计项', list(range(len(apps))),
+        index=next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0),
+        format_func=lambda i: apps[i]['name'] + ('（核心）' if apps[i]['priority'] == 'core' else '（可选）'), key=prefix + 'app')
+    sizes = image_sizes(work.images.settings.provider)
+    labels = dict(zip(sizes, ('方形', '横向', '纵向')))
+    size = st.selectbox('图稿像素规格', sizes, format_func=lambda s: labels[s] + ' · ' + s.replace('x', '×'), key=prefix + work.images.settings.provider + '-size')
+    if st.button('生成三版设计图稿', key=prefix + 'generate', type='primary', disabled=not enabled or not work.llm.configured):
+        launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], application_index=index, size=size)
+    step_feedback(engine, run['id'], op, demand_images.KINDS, 'images')
+    st.caption('失败后可补生成未完成图稿；服务端已生成但尚未保存时中断，重试可能再次调用并计费。')
+    assets = [a for a in run.get('image_assets', []) if a['design_id'] == design['id'] and a['application_index'] == index]
+    if not assets:
+        return
+    groups = list(dict.fromkeys(a['operation_id'] for a in reversed(assets)))
+    group = st.selectbox('图稿批次与修订历史', groups,
+        format_func=lambda g: next(f"图稿版本 {a['version']} 起 · {a['title']}" for a in assets if a['operation_id'] == g),
+        key=prefix + str(index) + '-history-' + str(len(assets)))
+    chosen = run.get('image_selections', {}).get(design['id'] + ':' + str(index))
+    if chosen:
+        selected_asset = next((a for a in assets if a['id'] == chosen), None)
+        if selected_asset:
+            st.caption(f"已选用：图稿版本 {selected_asset['version']} · {selected_asset['title']}")
+    shown = [a for a in assets if a['operation_id'] == group]
+    for col, asset in zip(st.columns(len(shown)), shown):
+        with col:
+            st.write(f"图稿版本 {asset['version']} · {asset['title']}")
+            try:
+                raw = demand_images.asset_path(work.demands, run['id'], asset['path']).read_bytes()
+            except (OSError, ValueError):
+                st.error('图片文件不可读取，请检查工作区备份。')
+                continue
+            st.image(raw, caption='概念图稿 · 可放大查看', width='stretch')
+            st.download_button('下载 PNG', raw, file_name=f"concept-{asset['id']}.png", mime='image/png', key=asset['id'] + '-download')
+            if st.button('已选用' if chosen == asset['id'] else '选用此图稿', disabled=not valid_source or busy, key=asset['id'] + '-select'):
+                ok, _ = action(engine, demand_images.select, work.demands, run['id'], asset['id'])
+                if ok:
+                    st.rerun()
+    if chosen and any(a['id'] == chosen for a in assets):
+        with st.form(prefix + str(index) + '-edit'):
+            instruction = st.text_area('图稿修改意见', placeholder='改为墨绿，减少装饰，保留主体。', max_chars=4000)
+            submit = st.form_submit_button('基于选用图稿生成新版本', disabled=not enabled)
+        if submit:
+            launch(engine, 'demand_image_revise', run['id'], image_id=chosen, instruction=instruction)

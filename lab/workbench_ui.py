@@ -453,6 +453,71 @@ def settings_page(engine):
             st.json({"workspace": engine.settings.workspace, "qdrant_mode": engine.settings.qdrant_mode, "qdrant_url": engine.settings.qdrant_url if engine.settings.qdrant_mode == "server" else "local files", "graph_storage": "LightRAG NetworkX / GraphML", "embedding": engine.settings.embedding_identity()})
             st.caption("向量模型和已有向量必须保持一致。更改 Qdrant / Embedding 请按 README 修改 .env 并重启服务。")
 
+    image_settings_panel(work)
+
+
+@st.fragment(run_every=2)
+def image_test_status(work):
+    jobs = [j for j in work.jobs() if j['kind'] == 'image_test']
+    if not jobs:
+        return
+    latest = jobs[0]
+    state_key = 'image-test-progress-' + str(work.directory)
+    previous = st.session_state.get(state_key)
+    current = (latest['id'], latest['status'])
+    st.session_state[state_key] = current
+    if previous == (latest['id'], 'running') and latest['status'] != 'running':
+        st.rerun(scope='app')
+    if latest['status'] == 'running':
+        st.info('正在生成测试图…切换页面不会重复提交。')
+    elif latest['status'] == 'success':
+        st.success(latest['message'])
+        path = work.directory / latest['image_path']
+        if path.is_file():
+            st.image(path.read_bytes(), width=300)
+    else:
+        st.warning(latest.get('message', '测试已中断，请重新测试。'))
+
+
+def image_settings_panel(work):
+    from lab.image_service import ImageSettings, PROVIDERS
+    st.subheader('图片生成模型')
+    st.caption('独立于文字模型。保存只校验配置格式；生成测试图会实际调用图片服务并产生费用。')
+    current = work.images.settings
+    provider = st.selectbox('图片服务商', list(PROVIDERS), index=list(PROVIDERS).index(current.provider),
+                            format_func=lambda p: PROVIDERS[p][0], disabled=bool(work.active))
+    defaults = current if provider == current.provider else ImageSettings(endpoint=PROVIDERS[provider][1], model=PROVIDERS[provider][2], provider=provider)
+    if provider == 'seedream':
+        st.caption('使用火山方舟 API Key；默认 Seedream 5.0 lite，支持文字出图和原图修改，输出带 AI 生成水印的 2K PNG。')
+    with st.form('image-model-settings-' + provider):
+        endpoint = st.text_input('图片 API 基础地址', value=defaults.endpoint, key='image-endpoint-' + provider)
+        model = st.text_input('图片模型名称', value=defaults.model, key='image-model-' + provider)
+        key = st.text_input('图片 API Key（留空保留同地址已保存密钥）', type='password')
+        clear = st.checkbox('清除图片 API Key')
+        timeout = st.number_input('图片调用超时（秒）', 15, 600, current.timeout, step=15)
+        save = st.form_submit_button('保存图片配置', disabled=bool(work.active))
+    if save:
+        retained = current.api_key if provider == current.provider and endpoint.strip().rstrip('/') == current.endpoint.rstrip('/') else ''
+        cfg = ImageSettings(endpoint.strip().rstrip('/'), model.strip(), '' if clear else key or retained, int(timeout), provider)
+        try:
+            work.configure_images(cfg)
+            st.success('图片配置已保存，尚未验证出图能力。')
+        except Exception as exc:
+            st.error(str(exc).replace(cfg.api_key, '[redacted]') if cfg.api_key else str(exc))
+    saved = work.images.settings
+    unsaved = (provider != saved.provider or endpoint.strip().rstrip('/') != saved.endpoint.rstrip('/')
+               or model.strip() != saved.model or int(timeout) != saved.timeout
+               or (bool(key) and key != saved.api_key) or (clear and bool(saved.api_key)))
+    if unsaved:
+        st.caption('请先保存当前图片配置，再生成测试图。')
+    if st.button('生成测试图', disabled=bool(work.active) or not work.images.configured or unsaved):
+        try:
+            work.start('image_test', {})
+            st.rerun()
+        except Exception as exc:
+            st.error(str(exc))
+    image_test_status(work)
+
 
 def render(engine, route):
     with st.sidebar:

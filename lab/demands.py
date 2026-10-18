@@ -477,7 +477,8 @@ class DemandService:
             self.save(run)
             return run, op
         from lab.demand_design import KINDS as DESIGN_KINDS, FORMAT_VERSION as DESIGN_FORMAT_VERSION
-        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise', *DESIGN_KINDS):
+        from lab import demand_images
+        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise', *DESIGN_KINDS, *demand_images.KINDS):
             raise ValueError('未知需求操作。')
         if kind != 'demand_analyze' and run['approved_revision'] != run['revision']:
             raise ValueError('请先按当前需求继续。')
@@ -493,6 +494,7 @@ class DemandService:
         instruction = inputs.get('instruction', '')
         if not isinstance(instruction, str) or len(instruction) > 4000:
             raise ValueError('修改意见需不超过 4000 字。')
+        image_data = demand_images.prepare(self, run, kind, inputs, instruction) if kind in demand_images.KINDS else None
         base = None
         source_brief = None
         if kind in DESIGN_KINDS:
@@ -536,6 +538,8 @@ class DemandService:
         op = {'id': uuid.uuid4().hex, 'format_version': CONTENT_FORMAT_VERSION, 'kind': kind, 'status': 'running', 'stage': '准备任务', 'created_at': utc_now(),
               'binding': binding(run), 'selection': deepcopy(run['selection']), 'input_snapshot': deepcopy(run['summaries'][-1]),
               'count': count, 'instruction': instruction, 'base': deepcopy(base), 'cache': {}, 'responses': []}
+        if image_data is not None:
+            op.update(image_data)
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
         if source_brief is not None:
@@ -697,6 +701,9 @@ class DemandService:
                 run['clarifications'].append({**value, 'id': op['id'], 'revision': run['revision'], 'analysis_format_version': analysis_version})
         elif kind == 'demand_search':
             await self.discover(run, op, job)
+        elif kind in ('demand_image_generate', 'demand_image_revise'):
+            from lab import demand_images
+            await demand_images.execute(self, run, op, job)
         elif kind in ('demand_design_generate', 'demand_design_revise'):
             from lab import demand_design
             if op['design_format_version'] != demand_design.FORMAT_VERSION:

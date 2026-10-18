@@ -52,6 +52,8 @@ class Workspace:
         self.job_dir.mkdir(exist_ok=True)
         self.active = None
         self.llm = ExtractionLLM(self.directory / "llm-settings.json", self.emit)
+        from lab.image_service import ImageService
+        self.images = ImageService(self.directory / "image-settings.json")
         from lab.ontology.service import SemanticService
         self.semantic = SemanticService(self.directory / "ontology", self)
         self.semantic.auto_publish()
@@ -70,6 +72,8 @@ class Workspace:
                 value["message"] = ("进程已中断。已采集资料和成功文本块保留；在校验报告中重试失败或中断块。尚未创建批次时请重新启动任务。"
                                     if value['kind'].startswith('semantic') else
                                     "进程已中断。请刷新资料状态，确认 LightRAG 的实际文档状态后再重试。")
+                if value['kind'] == 'image_test':
+                    value['message'] = '测试图任务已中断；可重新测试，服务端可能已产生费用。'
                 if value['kind'].startswith('campaign_'):
                     value['message'] = '营销任务已中断；已保存资料和版本，可在热点营销页重试失败阶段。'
                 if value['kind'].startswith('demand_'):
@@ -86,6 +90,8 @@ class Workspace:
 
     def start(self, kind, inputs):
         self.engine.ready.result()
+        if kind == 'image_test':
+            return self._start_image_test()
         if kind.startswith('demand_'):
             return self._start_demand(kind, inputs)
         if kind in {'campaign_search', 'campaign_generate', 'campaign_revise', 'campaign_retry', 'campaign_evergreen', 'campaign_recheck'}:
@@ -138,11 +144,59 @@ class Workspace:
             self.engine.gate.release()
             raise
 
+    def configure_images(self, settings):
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError('当前工作区有任务执行中，请稍后保存配置。')
+        try:
+            self.images.save(settings)
+        finally:
+            self.engine.gate.release()
+
+    def _start_image_test(self):
+        self.images.settings.validate()
+        if not self.images.configured:
+            raise ValueError('请先保存图片接口与密钥。')
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError('当前工作区有任务执行中，请稍后测试。')
+        try:
+            job = Job(self.job_dir, 'image_test', [])
+            self.active = job
+            async def execute():
+                try:
+                    from lab.image_service import image_sizes, write_png
+                    raw = await self.images.render('平面概念纹样：米白背景，墨绿细线水波与简洁桥拱，无文字，无摄影背景。', image_sizes(self.images.settings.provider)[0])
+                    relative = 'image-tests/' + job.value['id'] + '.png'
+                    write_png(self.directory / relative, raw)
+                    job.update(status='success', image_path=relative, message='测试图已生成，图片接口可用。')
+                except Exception as exc:
+                    from lab.engine import safe_error
+                    message = safe_error(exc, self.engine.settings)
+                    if self.images.settings.api_key:
+                        message = message.replace(self.images.settings.api_key, '[redacted]')
+                    job.update(status='failed', message=message)
+                finally:
+                    job.update(finished_at=utc_now())
+                    self.active = None
+                    self.engine.gate.release()
+                return job.snapshot()
+            return asyncio.run_coroutine_threadsafe(execute(), self.engine.loop), job
+        except Exception:
+            self.active = None
+            self.engine.gate.release()
+            raise
+
     def _start_demand(self, kind, inputs):
-        self.llm.settings.validate()
         if not self.engine.gate.acquire(blocking=False):
             raise ValueError('当前工作区有任务执行中，请稍后继续。')
         try:
+            effective = kind
+            cached_prompts = False
+            if kind == 'demand_retry':
+                prior = self.demands.load(inputs.get('run_id'))['operations'].get(inputs.get('operation_id'), {})
+                effective = prior.get('kind')
+                cached_prompts = 'image_prompts' in prior.get('cache', {})
+            if effective != 'demand_image_revise' and not (effective == 'demand_image_generate' and cached_prompts):
+                self.llm.settings.validate()
             run, operation = self.demands.prepare(kind, inputs)
             job = Job(self.job_dir, kind, [])
             operation['job_id'] = job.value['id']
@@ -158,6 +212,8 @@ class Workspace:
                     message = safe_error(exc, self.engine.settings)
                     if self.llm.settings.api_key:
                         message = message.replace(self.llm.settings.api_key, '[redacted]')
+                    if self.images.settings.api_key:
+                        message = message.replace(self.images.settings.api_key, '[redacted]')
                     operation.update(status='failed', message=message, finished_at=utc_now())
                     self.demands.save(run)
                     job.emit('job.failed', {'message': message, 'error_type': type(exc).__name__})
