@@ -39,8 +39,9 @@ def input_form(values, prefix, disabled=False):
     a, b = st.columns(2)
     result['path'] = a.selectbox('探索路径', list(PATHS), index=list(PATHS).index(values.get('path', 'trend')), format_func=PATHS.get, key=prefix + 'path', disabled=disabled)
     result['days'] = b.selectbox('热点搜索时间范围', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
-    for key in ('audience', 'scene', 'purpose', 'theme'):
-        result[key] = (st.text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
+    custom_columns = st.columns(2) if result['path'] == 'custom' else None
+    for i, key in enumerate(('audience', 'scene', 'purpose', 'theme')):
+        result[key] = (custom_columns[i % 2].text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
                        if result['path'] == 'custom' else values.get(key, ''))
     if result['path'] == 'custom':
         st.caption('定制路径至少填写目标人群、使用场景或文化主题中的一项。品牌未填写时保留为“未提供”。')
@@ -286,7 +287,7 @@ def demand_page(engine):
     busy = work.active is not None
     configured = work.llm.configured
     header('从生产能力，找到值得设计的产品', '明确需求、比较方向，把文化主题整理成设计方能使用的需求单。', 'ATLAS / PRODUCT EXPLORATION')
-    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 设计方案（含图稿）')
+    st.caption('从需求到图稿，在一个工作区完成探索、设计与交付。')
     if not configured:
         st.info('可以先保存需求；分析与生成前请在模型设置中配置连接。')
         st.link_button('打开模型设置', '/?view=settings')
@@ -329,14 +330,26 @@ def demand_page(engine):
     if op:
         fixed_status(engine, identifier, op['id'], op['status'] == 'running')
     prefix = f"demand-{identifier}-r{run['revision']}-"
+    steps = [('demand-clarify', '需求澄清', run['approved_revision'] == run['revision']),
+             ('demand-research', '热点依据', bool(run['research_id'])),
+             ('demand-candidates', '产品方向', bool(run['selection'])),
+             ('demand-brief', '设计需求单', any(not stale(run, b) and b['selection'] == run['selection'] for b in run['briefs'])),
+             ('demand-design', '方案与图稿', any(not stale(run, d) and d['selection'] == run['selection'] for d in run.get('design_versions', [])))]
+    st.markdown('<nav class="design-steps" aria-label="设计流程导航">' + ''.join(
+        f'<a href="#{anchor}" target="_self" class="{"complete" if done else ""}"><span>{i:02d}</span><strong>{label}</strong><small>{"已有成果" if done else "待完成"}</small></a>'
+        for i, (anchor, label, done) in enumerate(steps, 1)) + '</nav>', unsafe_allow_html=True)
     st.subheader('1 · 需求摘要与澄清', anchor='demand-clarify')
     analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
     st.caption('当前阶段：' + ('需求已确认' if run['approved_revision'] == run['revision'] else '完善需求中'))
-    for field, label in FIELDS.items():
-        st.write(f"{label}：{run['inputs'].get(field) or '未提供'}")
-    if analysis:
-        st.write('模型理解（建议）：' + '；'.join(analysis['known']))
-        st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
+    st.markdown('<div class="demand-summary"><div class="summary-request">' + escape(run['inputs'].get('request') or '尚未填写原始需求') + '</div><div class="summary-tags">' + ''.join(
+        '<span>' + escape(label + ' · ' + (run['inputs'].get(key) or '未提供')) + '</span>'
+        for key, label in [('industry', '行业'), ('brand', '品牌'), ('audience', '人群'), ('scene', '场景')]) + '</div></div>', unsafe_allow_html=True)
+    with st.expander('完整需求与分析', expanded=not analysis):
+        for field, label in FIELDS.items():
+            st.write(f"{label}：{run['inputs'].get(field) or '未提供'}")
+        if analysis:
+            st.write('模型理解（建议）：' + '；'.join(analysis['known']))
+            st.write('待探索：' + ('；'.join(analysis['unknown']) or '暂无'))
     st.caption('补充关键信息后，可随时确认需求并继续。')
     limited = len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS and not can_answer(run, analysis)
     a, b = st.columns(2)
@@ -417,22 +430,24 @@ def demand_page(engine):
         for candidate in batch['candidates']:
             with st.container(border=True):
                 st.write('**' + candidate['name'] + '**')
-                for field, label in labels.items():
-                    st.write(f"{label}：{candidate[field]}")
-                if batch.get('format_version', 1) >= 3:
-                    st.write('核心用途：' + candidate['purpose'])
-                    st.write('主要区别：' + candidate['differentiator'])
-                    st.write('需确认能力：' + ('；'.join(candidate['capability_gaps']) or '未列出额外能力缺口，方案细节仍需验证'))
-                if batch.get('format_version', 1) >= 2:
-                    st.write('文化故事：' + candidate['story'])
-                    st.write('视觉元素：' + candidate['visual_elements'])
-                if batch.get('format_version', 1) >= 3:
-                    with st.expander('故事到设计的对应（策划建议）'):
-                        st.markdown(mapping_markdown(candidate['story_mapping']))
-                with st.expander('必要假设与关键未知'):
-                    st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
-                    st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
-                facts_view(candidate['facts'])
+                st.write(candidate.get('differentiator') or candidate['design'])
+                with st.expander('查看产品详情与依据'):
+                    for field, label in labels.items():
+                        st.write(f"{label}：{candidate[field]}")
+                    if batch.get('format_version', 1) >= 3:
+                        st.write('核心用途：' + candidate['purpose'])
+                        st.write('主要区别：' + candidate['differentiator'])
+                        st.write('需确认能力：' + ('；'.join(candidate['capability_gaps']) or '未列出额外能力缺口，方案细节仍需验证'))
+                    if batch.get('format_version', 1) >= 2:
+                        st.write('文化故事：' + candidate['story'])
+                        st.write('视觉元素：' + candidate['visual_elements'])
+                    if batch.get('format_version', 1) >= 3:
+                        with st.expander('故事到设计的对应（策划建议）'):
+                            st.markdown(mapping_markdown(candidate['story_mapping']))
+                    with st.expander('必要假设与关键未知'):
+                        st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
+                        st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
+                    facts_view(candidate['facts'])
                 selected = run['selection'] == {'round_id': batch_id, 'candidate_id': candidate['id']}
                 if st.button('已选为设计方向' if selected else '选为设计方向', key=batch_id + candidate['id'], disabled=busy or historical or selected):
                     ok, _ = action(engine, service.select_candidate, identifier, batch_id, candidate['id'])
@@ -457,11 +472,11 @@ def demand_page(engine):
             st.warning('此需求单对应历史条件或其他产品选择；导出仍保留原始资料和版本。')
         if brief.get('format_version', 1) >= 2:
             for i, (title, body, auxiliary) in enumerate(brief_sections(run, brief)):
-                if auxiliary:
+                if auxiliary or i > 1:
                     with st.expander(title, expanded=False):
                         st.markdown(body)
                 else:
-                    st.markdown(('# ' if i == 0 else '## ') + title)
+                    st.markdown(('### ' if i == 0 else '#### ') + title)
                     st.markdown(body)
         else:
             st.markdown(export_markdown(run, brief))
@@ -561,6 +576,13 @@ def design_step(engine, run, source_brief, op):
     image_step(engine, run, design, valid_source and same_source and not historical, op)
 
 
+@st.dialog('图稿预览', width='large')
+def artwork_preview(raw, title):
+    st.write(title)
+    st.image(raw, width='stretch')
+    st.caption('概念图稿 · 可下载 PNG 查看原始像素')
+
+
 def image_step(engine, run, design, valid_source, op):
     from lab import demand_images
     from lab.image_service import image_sizes
@@ -606,7 +628,9 @@ def image_step(engine, run, design, valid_source, op):
             except (OSError, ValueError):
                 st.error('图片文件不可读取，请检查工作区备份。')
                 continue
-            st.image(raw, caption='概念图稿 · 可放大查看', width='stretch')
+            st.image(raw, caption='平面概念图稿', width='stretch')
+            if st.button('放大查看', key=asset['id'] + '-preview', width='stretch'):
+                artwork_preview(raw, asset['title'])
             st.download_button('下载 PNG', raw, file_name=f"concept-{asset['id']}.png", mime='image/png', key=asset['id'] + '-download')
             if st.button('已选用' if chosen == asset['id'] else '选用此图稿', disabled=not valid_source or busy, key=asset['id'] + '-select'):
                 ok, _ = action(engine, demand_images.select, work.demands, run['id'], asset['id'])

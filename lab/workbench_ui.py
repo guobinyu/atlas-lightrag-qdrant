@@ -413,11 +413,20 @@ def vector_page(engine):
 
 def settings_page(engine):
     work = engine.workbench
-    header("连接你的抽取模型", "Embedding 负责文本向量化；LLM 负责实体与关系抽取。这里配置后者，保存后立即生效。", "ATLAS / MODEL CONNECTIONS")
+    header("模型与服务设置", "文字模型负责需求分析与设计方案，图片模型负责生成与修改图稿。两类服务独立配置。", "ATLAS / MODEL CONNECTIONS")
+    text_tab, image_tab = st.tabs(["文字模型", "图片模型"])
+    with text_tab:
+        text_settings_panel(engine)
+    with image_tab:
+        image_settings_panel(work)
+
+
+def text_settings_panel(engine):
+    work = engine.workbench
     current = work.llm.settings
     connection, help_panel = st.columns([1.65, 1], gap='medium')
     with connection, st.container(key='settings-connection'):
-        section_heading('MODEL CONNECTION', '模型连接', '填写服务信息，测试成功后即可使用。')
+        section_heading('MODEL CONNECTION', '文字模型连接', '用于需求分析、设计方案与知识抽取。')
         with st.form("extraction-model"):
             provider = st.selectbox("模型服务", ["ollama", "http"], index=0 if current.provider == "ollama" else 1, format_func=lambda p: "本机 Ollama" if p == "ollama" else "Chat Completions 兼容 API")
             endpoint = st.text_input("完整接口地址", current.endpoint, help="Ollama 使用 /api/chat；兼容 API 通常使用 /v1/chat/completions。")
@@ -432,7 +441,7 @@ def settings_page(engine):
             try:
                 with st.spinner("正在向指定服务发送简短测试请求…"):
                     reply = work.configure_llm(candidate).result(timeout=candidate.timeout + 10)
-                st.success("连接成功，已保存。现在可以回到资料工作台构建图谱。")
+                st.success("连接成功，已保存。现在可以返回工作台继续分析与设计。")
                 st.caption(f"模型：{reply['model']} · 回复：{reply['reply']}")
             except Exception as exc:
                 st.error(str(exc).replace(candidate.api_key, "[redacted]") if candidate.api_key else str(exc))
@@ -452,8 +461,6 @@ def settings_page(engine):
         with st.expander("当前存储配置"):
             st.json({"workspace": engine.settings.workspace, "qdrant_mode": engine.settings.qdrant_mode, "qdrant_url": engine.settings.qdrant_url if engine.settings.qdrant_mode == "server" else "local files", "graph_storage": "LightRAG NetworkX / GraphML", "embedding": engine.settings.embedding_identity()})
             st.caption("向量模型和已有向量必须保持一致。更改 Qdrant / Embedding 请按 README 修改 .env 并重启服务。")
-
-    image_settings_panel(work)
 
 
 @st.fragment(run_every=2)
@@ -488,7 +495,7 @@ def image_settings_panel(work):
                             format_func=lambda p: PROVIDERS[p][0], disabled=bool(work.active))
     defaults = current if provider == current.provider else ImageSettings(endpoint=PROVIDERS[provider][1], model=PROVIDERS[provider][2], provider=provider)
     if provider == 'seedream':
-        st.caption('使用火山方舟 API Key；默认 Seedream 5.0 lite，支持文字出图和原图修改，输出带 AI 生成水印的 2K PNG。')
+        st.caption('使用火山方舟 API Key；请填写控制台当前可用的 Seedream 模型 ID，支持文字出图和原图修改，输出带 AI 生成水印的 2K PNG。')
     with st.form('image-model-settings-' + provider):
         endpoint = st.text_input('图片 API 基础地址', value=defaults.endpoint, key='image-endpoint-' + provider)
         model = st.text_input('图片模型名称', value=defaults.model, key='image-model-' + provider)
