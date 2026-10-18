@@ -542,6 +542,12 @@ class DemandService:
             op.update(image_data)
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
+        if source_brief is not None and inputs.get('include_images', False):
+            if not self.work.images.configured:
+                raise ValueError('请先配置图片服务，再生成包含图稿的设计方案。')
+            self.work.images.settings.validate()
+            op['include_images'] = True
+            op['image_config'] = self.work.images.settings.public()
         if source_brief is not None:
             op.update(design_format_version=DESIGN_FORMAT_VERSION, brief_snapshot=deepcopy(source_brief),
                       input_snapshot=deepcopy(source_brief['summary']))
@@ -719,6 +725,20 @@ class DemandService:
                     'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
                     'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
                     'instruction': op['instruction'], 'content': value})
+            # Save text before starting images; retries reuse both text and saved assets.
+            self.save(run)
+            if op.get('include_images'):
+                from lab import demand_images
+                from lab.image_service import image_sizes
+                if 'design_snapshot' not in op:
+                    design = next(v for v in versions if v['id'] == op['id'])
+                    apps = design['content']['applications']
+                    index = next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0)
+                    op.update(design_snapshot=deepcopy(design), application_index=index,
+                              application=deepcopy(apps[index]), image_base=None,
+                              size=image_sizes(op['image_config']['provider'])[0])
+                    self.save(run)
+                await demand_images.execute(self, run, op, job)
         elif kind == 'demand_candidates':
             context = await self.context(run, op, job)
             self.checkpoint(run, op, job, '生成产品候选')

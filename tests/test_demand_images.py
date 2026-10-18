@@ -146,7 +146,7 @@ def test_ui_generate_select_edit_history_and_application(images):
     run = designed(images)
     app = page(images)
     assert not app.exception
-    button(app, '生成三版设计图稿').click().run()
+    button(app, '补充生成三版设计图稿').click().run()
     wait(images); app.run()
     assert not app.exception
     assert len([b for b in app.get('download_button') if b.label == '下载 PNG']) == 3
@@ -281,7 +281,7 @@ def test_new_text_version_and_changed_source_keep_image_history(images):
     images.demands.update(run['id'], {**INPUT, 'purpose': '其他用途'})
     app.run()
     assert not app.exception
-    assert button(app, '生成三版设计图稿').disabled
+    assert button(app, '补充生成三版设计图稿').disabled
 
 
 @pytest.mark.parametrize('size', ['2048x2048', '2496x1664', '1664x2496'])
@@ -390,3 +390,48 @@ def test_provider_error_details_are_preserved_and_redacted(code, message):
 def test_error_non_json_does_not_expose_raw_response():
     from lab.image_service import image_error
     assert 'private raw body' not in image_error(httpx.Response(502, text='private raw body'), 'secret')
+
+
+def test_combined_design_images_retry_keeps_text_and_saved_images(images):
+    from test_demand_design import briefed
+    run = briefed(images)
+    renderer = images.images.render
+    count = 0
+    async def interrupted(*args, **kwargs):
+        nonlocal count
+        count += 1
+        if count == 2:
+            raise ValueError('temporary interruption')
+        return await renderer(*args, **kwargs)
+    images.images.render = interrupted
+    run, status = start(images, run, 'design_generate', brief_id=run['briefs'][0]['id'], include_images=True)
+    assert status['status'] == 'failed'
+    assert len(run['design_versions']) == 1 and len(run['image_assets']) == 1
+    design = deepcopy(run['design_versions'][0])
+    asset = deepcopy(run['image_assets'][0])
+    images.images.render = renderer
+    run, status = start(images, run, 'retry', operation_id=design['id'])
+    assert status['status'] == 'success'
+    assert run['design_versions'] == [design]
+    assert run['image_assets'][0] == asset
+    assert len(run['image_assets']) == 3 and len(images.image_calls) == 3
+    assert images.llm.calls == 1
+    run, status = start(images, run, 'design_revise', design_id=design['id'], instruction='主色改为墨绿', include_images=True)
+    assert status['status'] == 'success'
+    assert len(run['design_versions']) == 2 and len(run['image_assets']) == 6
+    assert run['design_versions'][0] == design
+    assert all(a['design_id'] == run['design_versions'][1]['id'] for a in run['image_assets'][3:])
+
+
+def test_page_design_generates_images_in_step_five(images):
+    from test_demand_design import briefed
+    run = briefed(images)
+    app = page(images)
+    button(app, '生成设计方案').click().run()
+    wait(images)
+    app.run()
+    assert not app.exception
+    saved = images.demands.load(run['id'])
+    assert len(saved['design_versions']) == 1 and len(saved['image_assets']) == 3
+    assert not any('6 ·' in h.value for h in app.subheader)
+    assert len([b for b in app.get('download_button') if b.label == '下载 PNG']) == 3

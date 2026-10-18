@@ -85,7 +85,7 @@ OP_TARGETS = {
     'demand_revise': ('demand-revise', '需求单修订'),
     'demand_image_generate': ('demand-images', '设计图稿'),
     'demand_image_revise': ('demand-images', '图稿修改'),
-    'demand_design_generate': ('demand-design', '文字设计方案'),
+    'demand_design_generate': ('demand-design', '设计方案与图稿'),
     'demand_design_revise': ('demand-design', '设计方案修订'),
 }
 
@@ -284,7 +284,7 @@ def demand_page(engine):
     busy = work.active is not None
     configured = work.llm.configured
     header('从生产能力，找到值得设计的产品', '明确需求、比较方向，把文化主题整理成设计方能使用的需求单。', 'ATLAS / PRODUCT EXPLORATION')
-    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 文字设计方案 → 设计图稿')
+    st.caption('商家能力 → 需求澄清 → 准备依据 → 产品候选 → 设计需求单 → 设计方案（含图稿）')
     if not configured:
         st.info('可以先保存需求；分析与生成前请在模型设置中配置连接。')
         st.link_button('打开模型设置', '/?view=settings')
@@ -501,7 +501,9 @@ def design_step(engine, run, source_brief, op):
     busy = work.active is not None
     identifier = run['id']
     st.subheader('5 · 设计方案', anchor='demand-design')
-    st.caption('直接生成完整文字提案，包含构图、配色、文案和逐项产品应用，可继续修订。')
+    st.caption('生成文字方案后，自动为第一个核心应用生成三版平面概念图稿；方案修订后也会生成对应的新图稿。')
+    if not work.images.configured:
+        st.info('尚未配置图片服务，本次只生成文字方案。配置后可在此补生成图稿。')
     valid_source = bool(source_brief and not stale(run, source_brief) and
                         source_brief['selection'] == run['selection'] and run['approved_revision'] == run['revision'])
     if source_brief:
@@ -511,7 +513,7 @@ def design_step(engine, run, source_brief, op):
     else:
         st.info('先选择并生成一份设计需求单，再生成完整设计方案。')
     if st.button('生成设计方案', type='primary', disabled=busy or not work.llm.configured or not valid_source):
-        launch(engine, 'demand_design_generate', identifier, brief_id=source_brief['id'])
+        launch(engine, 'demand_design_generate', identifier, brief_id=source_brief['id'], include_images=work.images.configured)
     step_feedback(engine, identifier, op, demand_design.KINDS, 'design')
     versions = list(reversed(run.get('design_versions', [])))
     if not versions:
@@ -544,7 +546,7 @@ def design_step(engine, run, source_brief, op):
         instruction = st.text_area('设计方案修改意见', placeholder='例如：主色改为墨绿，保留故事，简化盒面构图。', max_chars=4000, disabled=busy)
         revise = st.form_submit_button('生成设计方案新版本', disabled=busy or not work.llm.configured or historical or not same_source or not valid_source)
     if revise:
-        launch(engine, 'demand_design_revise', identifier, design_id=design['id'], instruction=instruction)
+        launch(engine, 'demand_design_revise', identifier, design_id=design['id'], instruction=instruction, include_images=work.images.configured)
     a, b = st.columns(2)
     a.download_button('下载设计方案 Markdown', demand_design.export_markdown(run, design),
         file_name=f"design-proposal-{identifier[:8]}-v{design['version']}.md", mime='text/markdown', key=prefix + 'md')
@@ -559,7 +561,7 @@ def image_step(engine, run, design, valid_source, op):
     work = engine.workbench
     busy = work.active is not None
     enabled = valid_source and work.images.configured and not busy
-    st.subheader('6 · 设计图稿', anchor='demand-images')
+    st.subheader('设计图稿', anchor='demand-images')
     st.caption('平面概念稿，供设计讨论；像素尺寸不代表生产尺寸。修改图稿不改写文字方案。')
     st.caption(f"来源：设计版本 {design['version']} · {design['content']['title']}")
     if not work.images.configured:
@@ -573,7 +575,7 @@ def image_step(engine, run, design, valid_source, op):
     sizes = image_sizes(work.images.settings.provider)
     labels = dict(zip(sizes, ('方形', '横向', '纵向')))
     size = st.selectbox('图稿像素规格', sizes, format_func=lambda s: labels[s] + ' · ' + s.replace('x', '×'), key=prefix + work.images.settings.provider + '-size')
-    if st.button('生成三版设计图稿', key=prefix + 'generate', type='primary', disabled=not enabled or not work.llm.configured):
+    if st.button('补充生成三版设计图稿', key=prefix + 'generate', type='primary', disabled=not enabled or not work.llm.configured):
         launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], application_index=index, size=size)
     step_feedback(engine, run['id'], op, demand_images.KINDS, 'images')
     st.caption('失败后可补生成未完成图稿；服务端已生成但尚未保存时中断，重试可能再次调用并计费。')
