@@ -54,6 +54,12 @@ class Workspace:
         self.llm = ExtractionLLM(self.directory / "llm-settings.json", self.emit)
         from lab.image_service import ImageService
         self.images = ImageService(self.directory / "image-settings.json")
+        from lab.search_service import SearchService
+        from lab.sources import use_search
+        # Reuses the Ark key saved for Seedream unless a separate search key is entered.
+        self.search = SearchService(self.directory / "search-settings.json",
+                                    lambda: self.images.settings.api_key if self.images.settings.provider == 'seedream' else '')
+        use_search(self.search)
         from lab.ontology.service import SemanticService
         self.semantic = SemanticService(self.directory / "ontology", self)
         self.semantic.auto_publish()
@@ -157,6 +163,14 @@ class Workspace:
             raise ValueError('当前工作区有任务执行中，请稍后保存配置。')
         try:
             self.images.save(settings)
+        finally:
+            self.engine.gate.release()
+
+    def configure_search(self, settings):
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError('当前工作区有任务执行中，请稍后保存配置。')
+        try:
+            self.search.save(settings)
         finally:
             self.engine.gate.release()
 

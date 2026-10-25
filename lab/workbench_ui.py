@@ -422,16 +422,69 @@ def vector_page(engine):
 def settings_page(engine):
     work = engine.workbench
     header("系统设置", "文字模型负责需求分析与设计方案，图片模型负责生成与修改图稿；企业档案和节日日历供爆款预测与定制设计使用。", "ATLAS / SETTINGS")
-    text_tab, image_tab, enterprise_tab, calendar_tab = st.tabs(["文字模型", "图片模型", "企业档案", "节日日历"])
+    text_tab, image_tab, search_tab, enterprise_tab, calendar_tab = st.tabs(["文字模型", "图片模型", "搜索服务", "企业档案", "节日日历"])
     with text_tab:
         text_settings_panel(engine)
     with image_tab:
         image_settings_panel(work)
+    with search_tab:
+        search_settings_panel(work)
     with enterprise_tab:
         enterprise_settings(engine)
     with calendar_tab:
         from lab.demand_ui import calendar_editor
         calendar_editor(engine)
+
+
+def search_settings_panel(work):
+    from lab.search_service import SearchSettings, PROVIDERS
+    st.subheader('联网搜索服务')
+    st.caption('用于爆款预测、定制设计、热点营销与知识库采集的近期热点搜索。方舟联网搜索按调用次数计费，开通与价格以方舟控制台为准。')
+    current = work.search.settings
+    busy = bool(work.active)
+    with st.form('search-settings'):
+        provider = st.selectbox('搜索服务', list(PROVIDERS), index=list(PROVIDERS).index(current.provider), format_func=PROVIDERS.get)
+        endpoint = st.text_input('方舟 API 基础地址', current.endpoint)
+        model = st.text_input('支持联网搜索的模型 ID 或推理接入点 ID', current.model,
+                              help='需要在方舟控制台开通，并支持工具调用。')
+        reuse = st.checkbox('复用图片模型中保存的方舟 API Key', current.use_image_key)
+        key = st.text_input('单独的方舟 API Key（选填；留空保留已保存的值）', type='password')
+        clear = st.checkbox('清除单独保存的 Key')
+        a, b = st.columns(2)
+        limit = a.number_input('每个检索词的结果数', 1, 20, current.limit)
+        timeout = b.number_input('搜索超时（秒）', 15, 600, current.timeout, step=15)
+        save = st.form_submit_button('保存搜索配置', type='primary', disabled=busy)
+    if save:
+        # Accept a pasted full request URL; the service appends /responses itself.
+        endpoint = endpoint.strip().rstrip('/').removesuffix('/responses')
+        retained = current.api_key if endpoint == current.endpoint.rstrip('/') else ''
+        cfg = SearchSettings(provider, endpoint, model.strip(), '' if clear else key or retained,
+                             reuse, int(timeout), int(limit))
+        try:
+            work.configure_search(cfg)
+            st.success('搜索配置已保存。')
+        except Exception as exc:
+            st.error(str(exc).replace(cfg.api_key, '[redacted]') if cfg.api_key else str(exc))
+    saved = work.search.settings
+    if saved.provider == 'ddgs':
+        st.warning('当前使用免 Key 公开搜索，依赖境外搜索引擎，国内网络下可能全部失败。')
+    elif not work.search.key():
+        st.info('尚未配置方舟 API Key：请在图片模型中保存方舟 Key 并勾选复用，或在此单独填写。未配置时会退回免 Key 公开搜索。')
+    else:
+        st.caption('当前：方舟联网搜索 · ' + saved.model + (' · 复用图片模型的 Key' if not saved.api_key else ' · 单独 Key'))
+    query = st.text_input('测试检索词', '2026 双十一 丝巾', key='search-test-query')
+    if st.button('测试搜索', disabled=busy or not work.search.active, help='会实际调用一次方舟联网搜索并计费。'):
+        try:
+            with st.spinner('正在搜索…'):
+                rows = work.search.search(query, 5)
+            if rows:
+                st.success(f'返回 {len(rows)} 条结果。')
+                st.dataframe([{'标题': r['title'], '站点': r['site_name'], '发布时间': r['published'], '链接': r['url']} for r in rows],
+                             hide_index=True, width='stretch')
+            else:
+                st.warning('调用成功，但没有返回带链接的搜索结果。可换个检索词，或确认模型支持联网搜索。')
+        except Exception as exc:
+            st.error(str(exc))
 
 
 def enterprise_settings(engine):

@@ -55,7 +55,7 @@ def test_top_nav_and_system_menu_switch_pages(demand):
     app.button(key='system-settings').click().run()
     assert not app.exception
     assert app.query_params['view'] == ['settings']
-    assert [t.label for t in app.tabs][:4] == ['文字模型', '图片模型', '企业档案', '节日日历']
+    assert [t.label for t in app.tabs][:5] == ['文字模型', '图片模型', '搜索服务', '企业档案', '节日日历']
     assert app.segmented_control(key='top-nav').value is None
 
 
@@ -81,9 +81,14 @@ def test_predict_board_multi_select_cards_and_export(demand):
     assert button(app, '生成备选方案').disabled  # No topic yet.
     app.checkbox(key=f"predict-topic-{run['id']}-N-double11-2026").check()
     app.checkbox(key=f"predict-topic-{run['id']}-N-christmas-2026").check()
+    assert any('尚未确认选题' in i.value for i in app.info)
     button(app, '确认选题').click().run()
     assert not app.exception
     assert demand.demands.load(run['id'])['topic_ids'] == ['N-double11-2026', 'N-christmas-2026']
+    assert any('已确认 2 个选题' in t.value for t in app.toast)
+    assert any('当前选题：双十一、圣诞节' in x.value for x in app.success)
+    button(app, '确认选题').click().run()
+    assert any('选题没有变化' in t.value for t in app.toast)
     button(app, '生成备选方案').click().run()
     wait(demand)
     app.run()
@@ -97,6 +102,14 @@ def test_predict_board_multi_select_cards_and_export(demand):
     assert not exported.proto.disabled
     # Pattern dispatch needs an image service.
     assert button(app, '下发纹样任务').disabled
+    # The next step is reachable from the research tab and opens the package tab.
+    assert any('已选方向' in c.value for c in app.caption)
+    button(app, '生成方案包').click().run()
+    wait(demand)
+    app.run()
+    assert not app.exception
+    assert app.query_params['step'] == ['方案包']
+    assert len(demand.demands.load(run['id'])['briefs']) == 1
 
 
 def test_predict_new_task_from_enterprise_profile(demand):
@@ -109,9 +122,39 @@ def test_predict_new_task_from_enterprise_profile(demand):
     app.text_area(key=f'predict-new-{profile}-request').input('预测节日丝巾')
     app.button(key=f'predict-new-{profile}-create').click().run()
     assert not app.exception
-    created = demand.demands.runs()[0]
+    wait(demand)
+    app.run()
+    assert not app.exception
+    created = demand.demands.load(demand.demands.runs()[0]['id'])
     assert created['inputs']['path'] == 'trend' and created['inputs']['capacity'] == {'lead_days': 15}
+    # The stub analysis asks a question, so the clarification dialog opens and nothing is confirmed yet.
+    assert demand.llm.calls == ['DEMAND_ANALYZE']
+    assert app.session_state['demand-dialog']['stage'] == 'questions'
+    assert created['approved_revision'] is None
+
+
+def test_predict_new_task_without_open_questions_is_confirmed(demand):
+    import json
+    previous = demand.llm
+    class NoQuestions:
+        configured, settings, calls = True, previous.settings, previous.calls
+        async def __call__(self, prompt, **kwargs):
+            value = json.loads(await previous(prompt, **kwargs))
+            value['questions'] = []
+            return json.dumps(value, ensure_ascii=False)
+    demand.llm = NoQuestions()
+    app = shell(demand, view='predict')
+    button(app, '新建研判任务').click().run()
+    app.text_area(key='predict-new-None-request').input('预测节日丝巾')
+    app.text_input(key='predict-new-None-industry').input('丝绸')
+    app.text_area(key='predict-new-None-capabilities').input('真丝丝巾')
+    app.button(key='predict-new-None-create').click().run()
+    wait(demand)
+    app.run()
+    assert not app.exception
+    created = demand.demands.load(demand.demands.runs()[0]['id'])
     assert created['approved_revision'] == created['revision']
+    assert 'demand-dialog' not in app.session_state
 
 
 def test_custom_chat_creates_task_answers_and_confirms(demand):

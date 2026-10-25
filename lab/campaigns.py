@@ -22,10 +22,8 @@ SECTIONS = ['选择理由', '传播主题', '受众', '渠道内容', '执行排
 
 
 def parse_json(raw):
-    raw = raw.strip()
-    if raw.startswith('```'):
-        raw = re.sub(r'^```(?:json)?\s*|\s*```$', '', raw)
-    value = json.loads(raw)
+    from lab.llm import json_text
+    value = json.loads(json_text(raw))
     if not isinstance(value, dict):
         raise ValueError('模型应返回 JSON 对象。')
     return value
@@ -307,12 +305,12 @@ class CampaignService:
                 try:
                     run['search_results'][query] = await asyncio.to_thread(search_web, query, 10)
                     self.save(run)
-                except Exception:
-                    run['issues'].append('搜索失败：' + query)
+                except Exception as exc:
+                    run['issues'].append('搜索失败：' + query + '（' + str(exc)[:160] + '）')
                     self.save(run)
             if not run['search_results']:
                 if not demo_mode(run, op):
-                    raise ValueError('全部搜索失败；没有生成话题。请重试。')
+                    raise ValueError('搜索服务不可用：全部检索词搜索失败，没有生成话题。请在系统设置的「搜索服务」中配置方舟联网搜索后重试。')
                 run['issues'].append('公开搜索未取得可用资料，继续生成常规内容演示方案，不代表近期热点。')
             candidates = {canonical(c['url']): c for items in run['search_results'].values() for c in items if canonical(c.get('url', ''))}
             seen = {u for s in run['sources'] for u in [s['url'], s.get('requested_url', ''), *[a['url'] for a in s.get('aliases', [])]]}

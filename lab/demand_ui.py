@@ -570,8 +570,9 @@ def confirmation_view(engine, run, analysis, inline=False):
         open_dialog(identifier, 'questions')
 
 
-def dialog_host(engine, run, busy):
-    """Shows the clarification dialog for this task when one is open or an awaited analysis finishes."""
+def dialog_host(engine, run, busy, auto_approve=False):
+    """Shows the clarification dialog for this task when one is open or an awaited analysis finishes.
+    With auto_approve, an analysis without open questions confirms the requirement instead of opening the dialog."""
     identifier = run['id']
     analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
     pending = st.session_state.get('demand-await')
@@ -579,7 +580,11 @@ def dialog_host(engine, run, busy):
         awaited = run['operations'].get(pending['op'])
         if awaited and awaited['status'] != 'running' and not busy:
             st.session_state.pop('demand-await', None)
-            if awaited['status'] == 'success':
+            if awaited['status'] == 'success' and auto_approve and not can_answer(run, analysis):
+                close_dialog()
+                if action(engine, engine.workbench.demands.approve, identifier)[0]:
+                    st.rerun()
+            elif awaited['status'] == 'success':
                 st.session_state['demand-dialog'] = {'id': identifier, 'stage': 'questions' if can_answer(run, analysis) else 'confirm'}
     dialog = st.session_state.get('demand-dialog')
     if dialog and dialog['id'] != identifier:
@@ -896,8 +901,10 @@ def image_step(engine, run, design, valid_source, op):
         st.link_button('配置图片模型', '/?view=settings')
     apps = design['content']['applications']
     prefix = f"demand-image-{run['id']}-{design['id']}-"
+    saved = {a.get('mode', 'application') for a in run.get('image_assets', []) if a['design_id'] == design['id']}
+    # A pattern task saves only pattern drafts; open them instead of an empty application view.
     mode = st.radio('图稿类型', ['application', 'pattern'], format_func=lambda m: '应用效果图' if m == 'application' else '纹样初稿（可平铺单元）',
-                    horizontal=True, key=prefix + 'mode')
+                    index=1 if saved == {'pattern'} else 0, horizontal=True, key=prefix + 'mode')
     if mode == 'pattern':
         index = 'pattern'
         st.caption('按方案配色、故事映射和方案包中的纹样方向生成三个方形纹样单元，供图案设计参考；未经接缝与分色检查。')

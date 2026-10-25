@@ -9,6 +9,33 @@ from urllib.parse import urlsplit
 import httpx
 
 
+def json_text(raw):
+    """Return the JSON value inside a model reply. Some reasoning models write notes or a code
+    fence around it, so the value that runs to the end of the reply is preferred."""
+    text = raw.strip()
+    fenced = re.fullmatch(r'```(?:json)?\s*(.*?)\s*```', text, flags=re.DOTALL)
+    if fenced:
+        text = fenced.group(1)
+    try:
+        json.loads(text)
+        return text
+    except ValueError:
+        pass
+    decoder, found = json.JSONDecoder(), None
+    for match in re.finditer(r'[\[{]', text):
+        try:
+            _, end = decoder.raw_decode(text, match.start())
+        except ValueError:
+            continue
+        rest = text[end:].strip()
+        if not rest or rest == '```':
+            return text[match.start():end]
+        if found is None:
+            found = text[match.start():end]
+    # Callers report the original parse error when nothing decodes.
+    return found if found is not None else text
+
+
 @dataclass
 class LLMSettings:
     provider: str = "http"

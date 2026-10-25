@@ -89,6 +89,12 @@ def workbench_for(run):
     return 'predict' if run['inputs']['path'] == 'trend' else 'custom'
 
 
+def goto_step(key, step):
+    """Open another step on the next run: the tab state is dropped so ?step= decides again."""
+    st.query_params['step'] = step
+    st.session_state.pop(key, None)
+
+
 def step_tabs(steps, key):
     """Tabs whose state follows ?step=, so a refresh or shared link opens the same step."""
     def changed():

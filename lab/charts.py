@@ -27,13 +27,14 @@ def score_breakdown(topics, labels, limit=8):
             marker={'color': color, 'line': {'color': '#ffffff', 'width': 2}},
             customdata=[[t['title']] for t in rows],
             hovertemplate='%{customdata[0]}<br>' + labels[key] + ' 贡献 %{x:.2f}<extra></extra>'))
+    left = min(220, 13 * max((len(n) for n in names), default=4) + 20)
     figure.update_layout(
-        barmode='stack', bargap=0.42, height=90 + 34 * max(len(rows), 1), margin={'l': 8, 'r': 8, 't': 36, 'b': 36},
+        barmode='stack', bargap=0.42, height=90 + 34 * max(len(rows), 1), margin={'l': left, 'r': 8, 't': 36, 'b': 36},
         paper_bgcolor='#ffffff', plot_bgcolor='#ffffff', font={'family': 'PingFang SC, Microsoft YaHei, sans-serif', 'color': '#213D3A', 'size': 12},
         legend={'orientation': 'h', 'y': 1.02, 'yanchor': 'bottom', 'x': 0, 'font': {'color': '#5B706B'}},
         xaxis={'range': [0, 1], 'title': {'text': '预测评分（非真实热度）', 'font': {'color': '#5B706B', 'size': 11}},
                'gridcolor': '#E6EBE6', 'zeroline': False, 'tickfont': {'color': '#5B706B'}},
-        yaxis={'autorange': 'reversed', 'tickfont': {'color': '#213D3A'}},
+        yaxis={'autorange': 'reversed', 'automargin': True, 'ticksuffix': '  ', 'tickfont': {'color': '#213D3A'}},
         hoverlabel={'bgcolor': '#ffffff', 'font': {'color': '#213D3A'}})
     return figure
 

@@ -81,7 +81,8 @@ def clean_element(value, themes):
 
 def parse(raw, themes):
     """Structural errors reject the block; type-mismatched relations and unknown themes become issues."""
-    value = json.loads(raw)
+    from lab.llm import json_text
+    value = json.loads(json_text(raw))
     if not isinstance(value, dict) or set(value) != {'elements', 'relations'}:
         raise ValueError('必须提供 elements、relations 两个数组')
     if any(not isinstance(value[k], list) or len(value[k]) > LIMIT for k in value):

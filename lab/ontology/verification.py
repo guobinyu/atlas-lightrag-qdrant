@@ -43,7 +43,8 @@ def parse(raw, claims, text, model):
                 raise ValueError('证据检查包含重复字段')
             obj[key] = value
         return obj
-    values = json.loads(raw, object_pairs_hook=unique)
+    from lab.llm import json_text
+    values = json.loads(json_text(raw), object_pairs_hook=unique)
     expected = {c['id'] for c in claims}
     if not isinstance(values, list) or len(values) != len(expected):
         raise ValueError('证据检查结果数量不匹配')

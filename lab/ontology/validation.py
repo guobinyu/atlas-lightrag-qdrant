@@ -17,7 +17,8 @@ def parse_response(raw):
                 raise ValueError('JSON 包含重复键')
             obj[key] = value
         return obj
-    value = json.loads(raw, object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('非法数值')))
+    from lab.llm import json_text
+    value = json.loads(json_text(raw), object_pairs_hook=unique, parse_constant=lambda _: (_ for _ in ()).throw(ValueError('非法数值')))
     if not isinstance(value, dict) or set(value) != {'entities', 'statements', 'deferred'}:
         raise ValueError('必须提供 entities、statements、deferred 三个数组')
     if any(not isinstance(value[k], list) for k in value) or any(len(value[k]) > 500 for k in value):

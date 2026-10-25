@@ -8,7 +8,7 @@ from lab.demand_ui import (TOPIC_KINDS, action, analyze_dialog, brief_step, cand
                            open_dialog, round_topics_caption, scoring_form, step_feedback, task_select)
 from lab.demands import can_answer, round_markdown, stale, structured_lines, topic_note
 from lab.enterprises import Enterprises
-from lab.ui_kit import badges, boundary, panel_title, step_tabs
+from lab.ui_kit import badges, boundary, goto_step, panel_title, step_tabs
 
 STEPS = ['研判', '方案包', '设计与纹样']
 
@@ -43,11 +43,15 @@ def new_task_dialog(engine):
     if st.button('创建并开始研判', type='primary', key=key + 'create'):
         ok, run = action(engine, service.create, {'request': request, 'industry': industry, 'brand': brand, 'capabilities': capabilities,
                                                   'constraints': constraints, 'capacity': capacity, 'budget': budget, 'path': 'trend', 'days': days})
-        if ok and action(engine, service.approve, run['id'])[0]:
+        if ok:
             close_new_task()
             st.query_params['demand'] = run['id']
             st.session_state['trend-task'] = run['id']
-            st.rerun()
+            if engine.workbench.llm.configured:
+                # The model reads the requirement first; questions open the clarification dialog when it finishes.
+                analyze_dialog(engine, run['id'])
+            elif action(engine, service.approve, run['id'])[0]:
+                st.rerun()
 
 
 def topic_board(engine, run, busy):
@@ -64,6 +68,14 @@ def topic_board(engine, run, busy):
             st.dataframe([{'话题': t['title'], '类型': TOPIC_KINDS[t['kind']], '预测评分': t['score']['score'],
                            **{demand_scoring.LABELS[k]: round(v, 3) for k, v in score_contributions(t['score']).items()},
                            '提示': '；'.join(t['score']['flags'])} for t in topics], hide_index=True, width='stretch')
+    flash = st.session_state.pop('predict-topic-flash', None)
+    if flash:
+        st.toast(flash, icon=':material/check_circle:')
+    titles = {t['id']: t['title'] for t in topics}
+    if run['topic_ids']:
+        st.success('当前选题：' + '、'.join(titles.get(i, i) for i in run['topic_ids']), icon=':material/check_circle:')
+    else:
+        st.info('尚未确认选题。勾选话题后点「确认选题」。')
     with st.form(f"predict-topics-{run['id']}-{run['revision']}"):
         st.caption(f'勾选 1–{service.MAX_TOPICS} 个话题，作为本轮候选的依据。')
         picked = []
@@ -78,9 +90,17 @@ def topic_board(engine, run, busy):
             st.caption('暂无话题。可以搜索近期热点或添加手动热点；未来 120 天内的节日节点会自动出现。')
         save = st.form_submit_button('确认选题', type='primary', disabled=busy or not topics)
     if save:
-        ok, _ = action(engine, service.set_topics, run['id'], picked)
-        if ok:
-            st.rerun()
+        if picked and set(picked) == set(run['topic_ids']):
+            st.toast('选题没有变化。', icon=':material/info:')
+        else:
+            ok, _ = action(engine, service.set_topics, run['id'], picked)
+            if ok:
+                # A toast called before rerun is lost, so show it on the next run.
+                message = f'已确认 {len(picked)} 个选题：' + '、'.join(titles[i] for i in picked)
+                if run['selection']:
+                    message += '。原已选方向已清空，请重新生成备选方案。'
+                st.session_state['predict-topic-flash'] = message
+                st.rerun()
     if st.button('搜索近期热点', icon=':material/travel_explore:', disabled=busy or not configured or not approved, key=f"predict-search-{run['id']}"):
         launch(engine, 'demand_search', run['id'])
     step_feedback(engine, run['id'], last_op(run), ('demand_search',), 'predict-search')
@@ -157,7 +177,7 @@ def action_bar(engine, run, batch, busy):
     configured, approved = work.llm.configured, run['approved_revision'] == run['revision']
     key = f"predict-actions-{run['id']}-"
     with st.container(border=True, key='predict-actions'):
-        a, b, c, d, e = st.columns([0.8, 1, 1.1, 1, 1.1], vertical_alignment='bottom')
+        a, b, c, d, f, e = st.columns([0.8, 1, 1.1, 1, 1.1, 1.1], vertical_alignment='bottom')
         count = a.selectbox('候选数量', [3, 5], key=key + 'count')
         with b.popover('本轮调整意见', icon=':material/edit_note:', width='stretch'):
             st.text_area('调整意见（选填）', max_chars=4000, key=key + 'instruction')
@@ -167,17 +187,26 @@ def action_bar(engine, run, batch, busy):
         d.download_button('导出方案', round_markdown(run, batch) if batch else '', file_name=f"candidates-{run['id'][:8]}.md",
                           mime='text/markdown', icon=':material/download:', disabled=batch is None, key=key + 'export', width='stretch')
         current = bool(run['selection']) and approved
+        if f.button('生成方案包', icon=':material/description:', key=key + 'brief', width='stretch',
+                    disabled=busy or not configured or not current,
+                    help='为已选方向生成需求单、产品方案包与需求规格书，完成后在「方案包」页查看和修订。'):
+            goto_step('predict-steps', '方案包')
+            launch(engine, 'demand_brief', run['id'])
         if e.button('下发纹样任务', icon=':material/texture:', key=key + 'pipeline', width='stretch',
                     disabled=busy or not configured or not work.images.configured or not current,
                     help='依次生成方案包、一版设计方案和三张可平铺纹样初稿。需要已选方向并配置图片服务。'):
             launch(engine, 'demand_pipeline', run['id'])
         if not run['topic_ids']:
             st.caption('请先在热点监测看板确认选题。')
-        elif not work.images.configured:
-            st.caption('下发纹样任务需要先在系统设置中配置图片服务。')
+        elif not run['selection']:
+            st.caption('生成备选方案后，在候选卡片上点「选为方向」，再生成方案包或下发纹样任务。')
+        else:
+            st.caption('已选方向。下一步：「生成方案包」逐步推进，或「下发纹样任务」一次生成方案包、设计方案和纹样初稿。'
+                       + ('' if work.images.configured else ' 下发纹样任务需要先在系统设置中配置图片服务。'))
     op = last_op(run)
     step_feedback(engine, run['id'], op, ('demand_candidates',), 'predict-candidates')
     step_feedback(engine, run['id'], op, ('demand_pipeline',), 'predict-pipeline')
+    step_feedback(engine, run['id'], op, ('demand_brief',), 'predict-brief')
 
 
 def last_op(run):
@@ -203,7 +232,7 @@ def predict_page(engine):
     if run is None:
         st.info('还没有研判任务。点击「新建研判任务」，选择企业档案并填写需求。')
         return
-    dialog_host(engine, run, busy)
+    dialog_host(engine, run, busy, auto_approve=True)
     analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
     approved = run['approved_revision'] == run['revision']
     with st.container(horizontal=True, vertical_alignment='center'):
@@ -211,7 +240,7 @@ def predict_page(engine):
         if not approved and st.button('确认当前需求', type='primary', disabled=busy, key=f"predict-approve-{run['id']}"):
             if action(engine, work.demands.approve, run['id'])[0]:
                 st.rerun()
-        if st.button('完善需求（可选）', disabled=busy or not work.llm.configured, key=f"predict-refine-{run['id']}"):
+        if st.button('完善需求', disabled=busy or not work.llm.configured, key=f"predict-refine-{run['id']}"):
             if analysis:
                 open_dialog(run['id'], 'questions' if can_answer(run, analysis) else 'confirm')
             else:

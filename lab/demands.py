@@ -12,6 +12,7 @@ from datetime import date, datetime
 from urllib.parse import urlsplit
 
 from lab import demand_scoring
+from lab.llm import json_text
 from lab.demand_presets import STYLES, TEMPLATES
 from lab.sources import search_web, fetch_source, utc_now
 from lab.trends import BEIJING, verify_date, topic_dates
@@ -980,7 +981,7 @@ class DemandService:
         record = {'stage': key, 'at': utc_now(), 'raw': raw}
         op['responses'].append(record)
         try:
-            value = json.loads(raw)
+            value = json.loads(json_text(raw))
             if not isinstance(value, dict):
                 raise ValueError('模型需返回 JSON 对象。')
             validate(value)
@@ -1009,8 +1010,8 @@ class DemandService:
                 continue
             try:
                 research['search_results'][query] = await asyncio.to_thread(search_web, query, 10)
-            except Exception:
-                research['issues'].append('搜索失败：' + query)
+            except Exception as exc:
+                research['issues'].append('搜索失败：' + query + '（' + str(exc)[:160] + '）')
             self.save(run)
         candidates = {s['url']: s for rows in research['search_results'].values() for s in rows}
         seen = {u for s in research['sources'] for u in [s['url'], s.get('requested_url'), *s.get('aliases', [])]}
@@ -1036,7 +1037,10 @@ class DemandService:
             seen.add(url)
             self.save(run)
         if not research['sources']:
-            raise ValueError('没有取得可用正文。可重试、重新搜索，或调整检索条件；不能在没有来源时编造热点。')
+            if not research['search_results']:
+                raise ValueError('搜索服务不可用：所有检索词都搜索失败。请在「系统 → 模型、企业与日历设置 → 搜索服务」配置方舟联网搜索，'
+                                 '或先勾选日历节点、添加手动热点继续研判。失败原因见执行历史。')
+            raise ValueError('搜索有结果，但没有读到可用正文。可重试、重新搜索，或调整检索条件；不能在没有来源时编造热点。')
         self.checkpoint(run, op, job, '提取话题并核验日期')
         for source in research['sources']:
             key = source['id']

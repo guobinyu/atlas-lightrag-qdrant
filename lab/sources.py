@@ -35,9 +35,20 @@ def public_url(url):
     return resolve_public_url(url)[0]
 
 
+_search_service = None
+
+
+def use_search(service):
+    """The workspace registers its search settings; search_web then prefers Ark web search."""
+    global _search_service
+    _search_service = service
+
+
 def search_web(query, limit=6):
     if not 2 <= len(query.strip()) <= 300:
         raise ValueError("请输入 2–300 个字符的研究主题。")
+    if _search_service is not None and _search_service.active:
+        return _search_service.search(query.strip(), min(10, limit))
     from ddgs import DDGS
     try:
         raw = DDGS(timeout=15).text(query, max_results=min(10, limit), region="wt-wt")

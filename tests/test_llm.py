@@ -47,3 +47,16 @@ def test_http_model_protocol_redaction_and_thinking_exclusion(tmp_path):
         server.shutdown()
         server.server_close()
         thread.join(timeout=5)
+
+
+def test_json_text_extracts_the_answer_from_reasoning_notes_and_fences():
+    from lab.llm import json_text
+    # Shape of a real deepseek reply: notes, braces inside the notes, then the answer.
+    leaked = '应该是 JSON 字符串。\n\n注意：格式 {"x"} 不用管。\n\n我们输出 JSON。{\n  "known": ["丝绸"],\n  "facts": []\n}'
+    assert json.loads(json_text(leaked)) == {'known': ['丝绸'], 'facts': []}
+    assert json.loads(json_text('```json\n{"a": 1}\n```')) == {'a': 1}
+    assert json.loads(json_text('例如 {"a": 0}，正式输出：\n{"a": 2}')) == {'a': 2}
+    assert json.loads(json_text('检索词：["丝绸", "非遗"]')) == ['丝绸', '非遗']
+    assert json_text('{"a": 1}') == '{"a": 1}'
+    with pytest.raises(ValueError):
+        json.loads(json_text('完全没有 JSON'))
