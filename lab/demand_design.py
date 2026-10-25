@@ -97,7 +97,7 @@ def validate(value, brief):
 
 
 def sections(run, design):
-    from lab.demands import mapping_markdown, FIELDS, structured_lines, package_markdown, topic_note
+    from lab.demands import mapping_markdown, FIELDS, structured_lines, package_markdown, topic_note, brief_topics
     v = design['content']
     brief = design['brief_snapshot']
     meta = (f"文字设计方案 · 任务：{run['id']} · 设计版本：{design['version']}"
@@ -133,8 +133,7 @@ def sections(run, design):
     pending = [f"- **{a['item']}**（{a['category']}）\n\n  建议责任：{a['owner']}；时点：{a['timing']}\n\n  推进方式：{a['approach']}" for a in v['followups']]
     result.append(('后续确认', '\n\n'.join(pending) or '暂无额外事项。', True))
     refs = []
-    if brief.get('topic'):
-        t = brief['topic']
+    for t in brief_topics(brief):
         refs += [t['title'], topic_note(t)]
     for fact in v['facts']:
         refs.append('- ' + fact['text'])

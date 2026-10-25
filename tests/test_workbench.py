@@ -170,7 +170,13 @@ def test_main_app_automatic_workflow_and_batch_graph(built_workspace, monkeypatc
         assert len(work.jobs()) == before
     finally:
         engine.gate.release()
-    app = AppTest.from_file(str(ROOT / 'app.py')).run(timeout=60)
+    app = AppTest.from_file(str(ROOT / 'app.py'))
+    app.run(timeout=60)
+    assert not app.exception
+    # The platform home is the default page; the collection workbench lives under the system menu.
+    assert any(b.label == '进入爆款预测' for b in app.button)
+    app.query_params['view'] = 'collect'
+    app.run(timeout=60)
     assert not app.exception
     assert app.text_input(key='auto-topic').value == '宋朝文化'
     next(b for b in app.button if b.label == '一键搜集并构建本体图谱').click().run(timeout=60)

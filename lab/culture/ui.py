@@ -21,10 +21,8 @@ def local_time(value):
 
 
 def swatches(colors):
-    # HEX values are validated on write; names are escaped. Text labels carry the meaning, not the color alone.
-    box = 'display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid #c9d2cc;vertical-align:-2px;margin-right:4px;background:'
-    return '　'.join(f'<span style="{box}{c["hex"]}" aria-hidden="true"></span>{escape(c["name"])} <code>{c["hex"]}</code>（{ROLE[c["role"]]}）'
-                    for c in colors)
+    from lab.ui_kit import swatches as kit
+    return kit(colors, roles=True)
 
 
 def parse_colors(text):

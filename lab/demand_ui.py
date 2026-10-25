@@ -4,7 +4,8 @@ from copy import deepcopy
 from html import escape
 import streamlit as st
 
-from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, clean_inputs, adoption_value, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections, candidate_comparison, mapping_markdown, structured_lines, topic_note, current_day
+from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, clean_inputs, adoption_value, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections, candidate_comparison, mapping_markdown, structured_lines, topic_note, current_day, capacity_status, brief_topics, brief_topic_scores
+from lab.ui_kit import badges, category_icon, swatches as kit_swatches
 from lab.demand_presets import CATEGORIES, CRAFTS, STYLES, TEMPLATES, TEMPLATE_FIELDS
 from lab import demand_scoring
 from lab.campaign_ui import local_time
@@ -68,9 +69,9 @@ def apply_template(prefix):
             st.session_state[prefix + field] = TEMPLATES[template][field]
 
 
-def capacity_form(values, prefix, disabled):
+def capacity_form(values, prefix, disabled, wrap=True, budget=True):
     cap, bud = values.get('capacity') or {}, values.get('budget') or {}
-    with st.expander('产能与预算（选填）', expanded=bool(cap or bud)):
+    with st.expander('产能与预算（选填）', expanded=bool(cap or bud)) if wrap else st.container():
         st.caption('填写后，产品候选按可生产品类、工艺和产能做硬性检查，需求单的定价参考需与预算单价有重叠。0 表示未填写；品类和工艺可输入列表外的项目。')
         a, b = st.columns(2)
         categories = a.multiselect('可生产品类', list(dict.fromkeys([*CATEGORIES, *cap.get('categories', [])])), default=cap.get('categories', []),
@@ -81,6 +82,8 @@ def capacity_form(values, prefix, disabled):
         lead = c.number_input('常规交期（天）', 0, 365, cap.get('lead_days', 0), key=prefix + 'cap-lead', disabled=disabled)
         monthly = d.number_input('月产能（件）', 0, 10_000_000, cap.get('monthly', 0), step=100, key=prefix + 'cap-monthly', disabled=disabled)
         moq = e.number_input('起订量（件）', 0, 10_000_000, cap.get('moq', 0), step=50, key=prefix + 'cap-moq', disabled=disabled)
+        if not budget:
+            return ({'categories': categories, 'crafts': crafts, 'lead_days': int(lead), 'monthly': int(monthly), 'moq': int(moq)}, {})
         f, g, h = st.columns(3)
         low = f.number_input('预算单价下限（元）', 0.0, 1_000_000.0, float(bud.get('price_min', 0)), step=10.0, key=prefix + 'budget-min', disabled=disabled)
         high = g.number_input('预算单价上限（元）', 0.0, 1_000_000.0, float(bud.get('price_max', 0)), step=10.0, key=prefix + 'budget-max', disabled=disabled)
@@ -103,9 +106,7 @@ def element_widgets(refs, key, disabled):
     return {'adopt': adopt, 'remove': remove, 'style': style}
 
 
-def swatches(palette):
-    box = 'display:inline-block;width:14px;height:14px;border-radius:3px;border:1px solid #c9d2cc;vertical-align:-2px;margin-right:4px;background:'
-    return '　'.join(f'<span style="{box}{escape(c["hex"])}" aria-hidden="true"></span>{escape(c["name"])} <code>{escape(c["hex"])}</code>' for c in palette)
+swatches = kit_swatches
 
 
 def topics_step(engine, run, research, prefix, busy):
@@ -144,54 +145,186 @@ def topics_step(engine, run, research, prefix, busy):
         for issue in research['issues']:
             st.caption(issue)
     with st.expander('添加手动热点'):
-        with st.form(prefix + 'manual-topic'):
-            title = st.text_input('热点标题', max_chars=60)
-            note = st.text_area('说明（选填）', max_chars=500)
-            url = st.text_input('参考链接（选填，只记录不读取）', max_chars=1000)
-            day = st.date_input('节点日期（选填）', value=None)
-            add = st.form_submit_button('添加热点', disabled=busy)
-        if add:
-            ok, _ = action(engine, service.add_manual_topic, identifier, title, note, url, day.isoformat() if day else None)
-            if ok:
-                st.rerun()
+        manual_topic_form(engine, run, prefix, busy)
     with st.expander('评分权重与人工热度'):
-        scoring = run.get('scoring', {})
-        weights = {**demand_scoring.WEIGHTS, **scoring.get('weights', {})}
-        heat = scoring.get('heat', {})
-        with st.form(prefix + 'scoring'):
-            columns = st.columns(4)
-            chosen = {k: columns[i].slider(demand_scoring.LABELS[k], 0.0, 1.0, float(weights[k]), 0.05) for i, k in enumerate(demand_scoring.WEIGHTS)}
-            st.caption('人工热度为 1–5，0 表示未填写。调整只重新排序，不调用模型，也不生成新版本。')
-            entered = {t['id']: st.number_input(f"{kinds[t['kind']]}：{t['title']}", 0, 5, heat.get(t['id'], 0), key=prefix + 'heat-' + t['id']) for t in topics}
-            save = st.form_submit_button('保存并重新排序', disabled=busy)
-        if save:
-            merged = {**{k: v for k, v in heat.items() if k not in entered}, **{k: int(v) for k, v in entered.items() if v}}
-            ok, _ = action(engine, service.set_scoring, identifier, chosen, merged)
-            if ok:
-                st.rerun()
-    with st.expander('节日与消费节点日历'):
-        st.caption(f'未来 {demand_scoring.WINDOW_DAYS} 天内的节点会出现在上方话题中。修改日历不影响已选中话题的快照。')
-        today = current_day().isoformat()
-        nodes = [n for n in service.calendar.nodes() if n['date'] >= today]
-        st.dataframe([{'日期': n['date'], '名称': n['name'], '类型': n['kind'], '说明': n['note'], '来源': '内置' if n['origin'] == 'builtin' else '自定义'} for n in nodes],
-                     hide_index=True, width='stretch')
-        with st.form(prefix + 'calendar-add'):
-            a, b, c = st.columns(3)
-            name = a.text_input('节点名称', max_chars=30)
-            day = b.date_input('节点日期', value=None)
-            kind = c.selectbox('类型', list(demand_scoring.KINDS))
-            note = st.text_input('说明（选填）', max_chars=200)
-            add = st.form_submit_button('添加节点', disabled=busy)
-        if add:
-            ok, _ = action(engine, service.calendar.add, name, day.isoformat() if day else '', kind, note)
-            if ok:
-                st.rerun()
-        labels = {n['key']: f"{n['date']} · {n['name']}" for n in nodes}
-        target = st.selectbox('删除节点', [None, *labels], format_func=lambda k: labels.get(k, '选择要删除的节点'), key=prefix + 'calendar-remove')
-        if st.button('删除所选节点', disabled=busy or not target, key=prefix + 'calendar-remove-button'):
-            ok, _ = action(engine, service.calendar.remove, target)
-            if ok:
-                st.rerun()
+        scoring_form(engine, run, topics, prefix, busy)
+
+
+TOPIC_KINDS = {'search': '搜索话题', 'calendar': '日历节点', 'manual': '手动热点'}
+
+
+def manual_topic_form(engine, run, prefix, busy):
+    with st.form(prefix + 'manual-topic'):
+        title = st.text_input('热点标题', max_chars=60)
+        note = st.text_area('说明（选填）', max_chars=500)
+        url = st.text_input('参考链接（选填，只记录不读取）', max_chars=1000)
+        day = st.date_input('节点日期（选填）', value=None)
+        add = st.form_submit_button('添加热点', disabled=busy)
+    if add:
+        ok, _ = action(engine, engine.workbench.demands.add_manual_topic, run['id'], title, note, url, day.isoformat() if day else None)
+        if ok:
+            st.rerun()
+
+
+def scoring_form(engine, run, topics, prefix, busy):
+    scoring = run.get('scoring', {})
+    weights = {**demand_scoring.WEIGHTS, **scoring.get('weights', {})}
+    heat = scoring.get('heat', {})
+    with st.form(prefix + 'scoring'):
+        columns = st.columns(4)
+        chosen = {k: columns[i].slider(demand_scoring.LABELS[k], 0.0, 1.0, float(weights[k]), 0.05) for i, k in enumerate(demand_scoring.WEIGHTS)}
+        st.caption('人工热度为 1–5，0 表示未填写。调整只重新排序，不调用模型，也不生成新版本。')
+        entered = {t['id']: st.number_input(f"{TOPIC_KINDS[t['kind']]}：{t['title']}", 0, 5, heat.get(t['id'], 0), key=prefix + 'heat-' + t['id']) for t in topics}
+        save = st.form_submit_button('保存并重新排序', disabled=busy)
+    if save:
+        merged = {**{k: v for k, v in heat.items() if k not in entered}, **{k: int(v) for k, v in entered.items() if v}}
+        ok, _ = action(engine, engine.workbench.demands.set_scoring, run['id'], chosen, merged)
+        if ok:
+            st.rerun()
+
+
+def calendar_editor(engine, prefix='settings-calendar-'):
+    service = engine.workbench.demands
+    busy = engine.workbench.active is not None
+    st.caption(f'未来 {demand_scoring.WINDOW_DAYS} 天内的节点会出现在爆款预测的话题中。修改日历不影响已选中话题的快照。')
+    today = current_day().isoformat()
+    nodes = [n for n in service.calendar.nodes() if n['date'] >= today]
+    st.dataframe([{'日期': n['date'], '名称': n['name'], '类型': n['kind'], '说明': n['note'], '来源': '内置' if n['origin'] == 'builtin' else '自定义'} for n in nodes],
+                 hide_index=True, width='stretch')
+    with st.form(prefix + 'add'):
+        a, b, c = st.columns(3)
+        name = a.text_input('节点名称', max_chars=30)
+        day = b.date_input('节点日期', value=None)
+        kind = c.selectbox('类型', list(demand_scoring.KINDS))
+        note = st.text_input('说明（选填）', max_chars=200)
+        add = st.form_submit_button('添加节点', disabled=busy)
+    if add:
+        ok, _ = action(engine, service.calendar.add, name, day.isoformat() if day else '', kind, note)
+        if ok:
+            st.rerun()
+    labels = {n['key']: f"{n['date']} · {n['name']}" for n in nodes}
+    target = st.selectbox('删除节点', [None, *labels], format_func=lambda k: labels.get(k, '选择要删除的节点'), key=prefix + 'remove')
+    if st.button('删除所选节点', disabled=busy or not target, key=prefix + 'remove-button'):
+        ok, _ = action(engine, service.calendar.remove, target)
+        if ok:
+            st.rerun()
+
+
+def enterprise_picker(engine, key, disabled, label='选择企业档案'):
+    """Returns (profile id, task fields). The profile only prefills; tasks keep their own copy."""
+    from lab.enterprises import Enterprises
+    store = engine.workbench.enterprises
+    profiles = store.list()
+    if not profiles:
+        st.caption('尚未保存企业档案，可在「系统 → 模型、企业与日历设置」中添加，或在任务中另存。')
+        return None, {}
+    names = {p['id']: p['name'] for p in profiles}
+    chosen = st.selectbox(label, [None, *names], format_func=lambda k: names.get(k, '不使用档案'), key=key, disabled=disabled)
+    profile = store.get(chosen) if chosen else None
+    return (chosen, Enterprises.task_fields(profile)) if profile else (None, {})
+
+
+def task_select(engine, path, label):
+    """Task picker for one workbench; follows ?demand= so links and job panels open the right task."""
+    service = engine.workbench.demands
+    runs = [r for r in service.runs() if r['inputs']['path'] == path]
+    if not runs:
+        return None
+    names = {r['id']: f"{local_time(r['created_at'])} · {r['inputs']['request'][:28]} · {r['id'][:6]}" for r in runs}
+    key = path + '-task'
+    requested = st.query_params.get('demand')
+    if requested in names and st.session_state.get(key + '-url') != requested:
+        st.session_state[key] = requested
+        st.session_state[key + '-url'] = requested
+    if st.session_state.get(key) not in names:
+        st.session_state[key] = runs[0]['id']
+
+    def changed():
+        st.query_params['demand'] = st.session_state[key]
+        st.session_state[key + '-url'] = st.session_state[key]
+    identifier = st.selectbox(label, list(names), format_func=names.get, key=key, on_change=changed)
+    return service.load(identifier)
+
+
+CANDIDATE_LABELS = {'form': '产品形态', 'audience': '目标人群', 'scene': '使用场景', 'theme': '文化主题', 'reason': '需求与推荐理由', 'capability_fit': '能力匹配判断', 'design': '差异化设计建议'}
+
+
+def candidate_detail(batch, candidate):
+    for field, label in CANDIDATE_LABELS.items():
+        st.write(f"{label}：{candidate[field]}")
+    if batch.get('format_version', 1) >= 3:
+        st.write('核心用途：' + candidate['purpose'])
+        st.write('主要区别：' + candidate['differentiator'])
+        st.write('需确认能力：' + ('；'.join(candidate['capability_gaps']) or '未列出额外能力缺口，方案细节仍需验证'))
+    if batch.get('format_version', 1) >= 4:
+        req = candidate['requirements']
+        st.write('品类与工艺：' + req['category'] + ('；' + '、'.join(req['crafts']) if req['crafts'] else ''))
+        st.write(f"爆款潜力（模型判断）：{candidate['potential']['score']}/5 · {candidate['potential']['reason']}")
+    if batch.get('format_version', 1) >= 2:
+        st.write('文化故事：' + candidate['story'])
+        st.write('视觉元素：' + candidate['visual_elements'])
+    if batch.get('format_version', 1) >= 3:
+        with st.expander('故事到设计的对应（策划建议）'):
+            st.markdown(mapping_markdown(candidate['story_mapping']))
+    with st.expander('必要假设与关键未知'):
+        st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
+        st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
+    facts_view(candidate['facts'])
+
+
+def candidate_cards(engine, run, batch, busy):
+    """Sketch-style candidate cards: category icon, difference, model-judged potential and capacity check."""
+    service = engine.workbench.demands
+    historical = stale(run, batch)
+    v4 = batch.get('format_version', 1) >= 4
+    capacity = batch['context']['summary']['inputs'].get('capacity') or {}
+    for candidate in batch['candidates']:
+        with st.container(border=True, key=f"candidate-{batch['id']}-{candidate['id']}"):
+            category = candidate['requirements']['category'] if v4 else candidate['form']
+            st.markdown(f"**{category_icon(category)} {escape(candidate['name'])}**")
+            st.write(candidate.get('differentiator') or candidate['design'])
+            if v4:
+                req = candidate['requirements']
+                st.caption(req['category'] + (' · ' + '、'.join(req['crafts']) if req['crafts'] else ''))
+                st.progress(candidate['potential']['score'] / 5, text=f"爆款潜力 {candidate['potential']['score']}/5")
+                status = capacity_status(candidate, capacity)
+                st.markdown(badges('model', 'unset' if not capacity else 'gap' if '需新增' in status else 'pass'))
+                if '需新增' in status:
+                    st.caption(status)
+            with st.expander('详情与依据'):
+                candidate_detail(batch, candidate)
+            selected = run['selection'] == {'round_id': batch['id'], 'candidate_id': candidate['id']}
+            if st.button('已选为方向' if selected else '选为方向', key=f"pick-{batch['id']}-{candidate['id']}",
+                         disabled=busy or historical or selected, type='primary' if selected else 'secondary', width='stretch'):
+                ok, _ = action(engine, service.select_candidate, run['id'], batch['id'], candidate['id'])
+                if ok:
+                    st.rerun()
+
+
+def round_topics_caption(batch):
+    context = batch['context']
+    scores = brief_topic_scores(context)
+    for topic in brief_topics(context):
+        score = (scores.get(topic['id']) or {}).get('score')
+        st.caption(f"选题：{topic['title']}" + (f" · 预测评分 {score:.2f}" if score is not None else '') + ' · ' + topic_note(topic))
+
+
+def history_view(run):
+    for summary in reversed(run['summaries']):
+        st.write(f"需求版本 {summary['revision']} · {local_time(summary['at'])}")
+        for key, label in FIELDS.items():
+            st.caption(f"{label}：{summary['inputs'].get(key) or '未提供'}")
+        for line in structured_lines(summary['inputs']):
+            st.caption(line)
+        for question, answer in summary['answers'].items():
+            st.write(question + '：' + answer)
+    for item in reversed(list(run['operations'].values())):
+        st.write(f"{local_time(item['created_at'])} · {item['stage']} · {STATES[item['status']]}")
+        if item.get('message'):
+            st.caption(item['message'])
+        for response in item['responses']:
+            if response.get('error'):
+                st.caption('输出检查未通过：' + response['error'])
 
 
 def evidence_view(evidence):
@@ -240,6 +373,7 @@ OP_TARGETS = {
     'demand_image_revise': ('demand-images', '图稿修改'),
     'demand_design_generate': ('demand-design', '设计方案与图稿'),
     'demand_design_revise': ('demand-design', '设计方案修订'),
+    'demand_pipeline': ('demand-design', '纹样任务'),
 }
 
 
@@ -369,7 +503,7 @@ def adopt_to_draft(prefix, analysis, kind, field):
     draft['expected'][field] = value
 
 
-def confirmation_view(engine, run, analysis):
+def confirmation_view(engine, run, analysis, inline=False):
     service = engine.workbench.demands
     identifier = run['id']
     prefix = f"demand-confirm-{identifier}-{run['revision']}-"
@@ -384,8 +518,12 @@ def confirmation_view(engine, run, analysis):
             st.write(f"{label}：{run['inputs'].get(field) or '未提供'}")
         for question, answer in service.draft_answers(run).items():
             st.write(question + '：' + answer)
-    st.write('可编辑需求摘要')
-    values = input_form(run['inputs'], prefix)
+    if inline:
+        with st.expander('编辑需求摘要'):
+            values = input_form(run['inputs'], prefix)
+    else:
+        st.write('可编辑需求摘要')
+        values = input_form(run['inputs'], prefix)
     # These widgets are deliberately outside a form: edits must invalidate old
     # recommendations before another recommendation can be adopted.
     if clean_inputs(values) != draft['expected']:
@@ -413,21 +551,41 @@ def confirmation_view(engine, run, analysis):
         st.write('仍待探索内容（原分析记录）' if not applicable else '仍待探索内容')
         st.write('；'.join(analysis['unknown']) or '暂无')
     st.caption('部分条件暂不确定仍可继续；设计细节由后续产品建议展开。')
-    if st.button('确认需求并继续', type='primary'):
+    if st.button('确认需求并继续', type='primary', key=prefix + 'confirm'):
         ok, updated = action(engine, service.confirm, identifier, values, run['revision'], draft['adoptions'])
         if ok:
             close_dialog()
             if updated['inputs']['path'] == 'trend' and not updated['research_id']:
                 launch(engine, 'demand_search', identifier)
             st.rerun()
-    if len(clarification_rounds(run)) < MAX_CLARIFICATION_ROUNDS and st.button('保存摘要并重新分析'):
+    if len(clarification_rounds(run)) < MAX_CLARIFICATION_ROUNDS and st.button('保存摘要并重新分析', key=prefix + 'reanalyze'):
         ok, _ = action(engine, service.update, identifier, values, service.draft_answers(run))
         if ok:
             close_dialog()
+            if inline:
+                launch(engine, 'demand_analyze', identifier)
             analyze_dialog(engine, identifier)
-    if can_answer(run, analysis) and st.button('返回补充问题'):
+    if not inline and can_answer(run, analysis) and st.button('返回补充问题'):
         close_dialog()
         open_dialog(identifier, 'questions')
+
+
+def dialog_host(engine, run, busy):
+    """Shows the clarification dialog for this task when one is open or an awaited analysis finishes."""
+    identifier = run['id']
+    analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
+    pending = st.session_state.get('demand-await')
+    if pending and pending['id'] == identifier:
+        awaited = run['operations'].get(pending['op'])
+        if awaited and awaited['status'] != 'running' and not busy:
+            st.session_state.pop('demand-await', None)
+            if awaited['status'] == 'success':
+                st.session_state['demand-dialog'] = {'id': identifier, 'stage': 'questions' if can_answer(run, analysis) else 'confirm'}
+    dialog = st.session_state.get('demand-dialog')
+    if dialog and dialog['id'] != identifier:
+        close_dialog()
+    elif dialog and (not busy or dialog['stage'] == 'waiting'):
+        clarification_dialog(engine, identifier, dialog['stage'])
 
 
 def demand_page(engine):
@@ -515,18 +673,7 @@ def demand_page(engine):
     if b.button('按当前需求继续', disabled=busy):
         open_dialog(identifier, 'confirm')
     step_feedback(engine, identifier, op, ('demand_analyze',), 'clarify')
-    pending = st.session_state.get('demand-await')
-    if pending and pending['id'] == identifier:
-        awaited = run['operations'].get(pending['op'])
-        if awaited and awaited['status'] != 'running' and not busy:
-            st.session_state.pop('demand-await', None)
-            if awaited['status'] == 'success':
-                st.session_state['demand-dialog'] = {'id': identifier, 'stage': 'questions' if can_answer(run, analysis) else 'confirm'}
-    dialog = st.session_state.get('demand-dialog')
-    if dialog and dialog['id'] != identifier:
-        close_dialog()
-    elif dialog and (not busy or dialog['stage'] == 'waiting'):
-        clarification_dialog(engine, identifier, dialog['stage'])
+    dialog_host(engine, run, busy)
     approved = run['approved_revision'] == run['revision']
     st.subheader('2 · 准备依据', anchor='demand-research')
     if not approved:
@@ -573,32 +720,12 @@ def demand_page(engine):
             st.write('本轮方案对比')
             st.table(candidate_comparison(batch))
             st.caption('选择表示认可产品方向；容量、材料和工艺等细节仍按建议及后续确认处理。')
-        labels = {'form': '产品形态', 'audience': '目标人群', 'scene': '使用场景', 'theme': '文化主题', 'reason': '需求与推荐理由', 'capability_fit': '能力匹配判断', 'design': '差异化设计建议'}
         for candidate in batch['candidates']:
             with st.container(border=True):
                 st.write('**' + candidate['name'] + '**')
                 st.write(candidate.get('differentiator') or candidate['design'])
                 with st.expander('查看产品详情与依据'):
-                    for field, label in labels.items():
-                        st.write(f"{label}：{candidate[field]}")
-                    if batch.get('format_version', 1) >= 3:
-                        st.write('核心用途：' + candidate['purpose'])
-                        st.write('主要区别：' + candidate['differentiator'])
-                        st.write('需确认能力：' + ('；'.join(candidate['capability_gaps']) or '未列出额外能力缺口，方案细节仍需验证'))
-                    if batch.get('format_version', 1) >= 4:
-                        req = candidate['requirements']
-                        st.write('品类与工艺：' + req['category'] + ('；' + '、'.join(req['crafts']) if req['crafts'] else ''))
-                        st.write(f"爆款潜力（模型判断）：{candidate['potential']['score']}/5 · {candidate['potential']['reason']}")
-                    if batch.get('format_version', 1) >= 2:
-                        st.write('文化故事：' + candidate['story'])
-                        st.write('视觉元素：' + candidate['visual_elements'])
-                    if batch.get('format_version', 1) >= 3:
-                        with st.expander('故事到设计的对应（策划建议）'):
-                            st.markdown(mapping_markdown(candidate['story_mapping']))
-                    with st.expander('必要假设与关键未知'):
-                        st.caption('必要假设：' + ('；'.join(candidate['assumptions']) or '暂无'))
-                        st.caption('关键未知：' + ('；'.join(candidate['questions']) or '暂无'))
-                    facts_view(candidate['facts'])
+                    candidate_detail(batch, candidate)
                 selected = run['selection'] == {'round_id': batch_id, 'candidate_id': candidate['id']}
                 if st.button('已选为设计方向' if selected else '选为设计方向', key=batch_id + candidate['id'], disabled=busy or historical or selected):
                     ok, _ = action(engine, service.select_candidate, identifier, batch_id, candidate['id'])
@@ -606,12 +733,28 @@ def demand_page(engine):
                         st.rerun()
         with st.expander('本轮参考资料'):
             evidence_view(batch['context']['evidence'])
-    st.subheader('4 · 设计需求单', anchor='demand-brief')
-    if run['selection']:
-        st.caption(f"当前选择：{run['selection']['round_id'][:6]} / {run['selection']['candidate_id']}")
-    if st.button('生成设计需求单', type='primary', disabled=busy or not configured or not run['selection'] or not approved):
-        launch(engine, 'demand_brief', identifier)
-    step_feedback(engine, identifier, op, ('demand_brief',), 'brief')
+    selected_brief = brief_step(engine, run, prefix, op)
+    design_step(engine, run, selected_brief, op)
+    with st.expander('需求与执行历史'):
+        history_view(run)
+    st.markdown('<div style="height:88px" aria-hidden="true"></div>', unsafe_allow_html=True)
+
+
+def brief_step(engine, run, prefix, op, heading='4 · 设计需求单', generate=True):
+    work = engine.workbench
+    busy = work.active is not None
+    configured = work.llm.configured
+    identifier = run['id']
+    approved = run['approved_revision'] == run['revision']
+    st.subheader(heading, anchor='demand-brief')
+    if generate:
+        if run['selection']:
+            st.caption(f"当前选择：{run['selection']['round_id'][:6]} / {run['selection']['candidate_id']}")
+        else:
+            st.caption('请先选定一个产品方向。')
+        if st.button('生成设计需求单', type='primary', disabled=busy or not configured or not run['selection'] or not approved, key=prefix + 'brief-generate'):
+            launch(engine, 'demand_brief', identifier)
+        step_feedback(engine, identifier, op, ('demand_brief',), 'brief')
     selected_brief = None
     if run['briefs']:
         briefs = {b['id']: b for b in reversed(run['briefs'])}
@@ -644,30 +787,15 @@ def demand_page(engine):
         if revise:
             launch(engine, 'demand_revise', identifier, brief_id=bid, instruction=revision, element_changes=changes)
         step_feedback(engine, identifier, op, ('demand_revise',), 'revise')
-    design_step(engine, run, selected_brief, op)
-    with st.expander('需求与执行历史'):
-        for summary in reversed(run['summaries']):
-            st.write(f"需求版本 {summary['revision']} · {local_time(summary['at'])}")
-            for key, label in FIELDS.items():
-                st.caption(f"{label}：{summary['inputs'].get(key) or '未提供'}")
-            for question, answer in summary['answers'].items():
-                st.write(question + '：' + answer)
-        for item in reversed(operations):
-            st.write(f"{local_time(item['created_at'])} · {item['stage']} · {STATES[item['status']]}")
-            if item.get('message'):
-                st.caption(item['message'])
-            for response in item['responses']:
-                if response.get('error'):
-                    st.caption('输出检查未通过：' + response['error'])
-    st.markdown('<div style="height:88px" aria-hidden="true"></div>', unsafe_allow_html=True)
+    return selected_brief
 
 
-def design_step(engine, run, source_brief, op):
+def design_step(engine, run, source_brief, op, heading='5 · 设计方案', default_variants=1):
     from lab import demand_design
     work = engine.workbench
     busy = work.active is not None
     identifier = run['id']
-    st.subheader('5 · 设计方案', anchor='demand-design')
+    st.subheader(heading, anchor='demand-design')
     st.caption('生成文字方案后，自动为第一个核心应用生成三版平面概念图稿；方案修订后也会生成对应的新图稿。')
     if not work.images.configured:
         st.info('尚未配置图片服务，本次只生成文字方案。配置后可在此补生成图稿。')
@@ -679,7 +807,7 @@ def design_step(engine, run, source_brief, op):
             st.info('此来源对应历史条件或其他产品方向；请在上方选择当前有效需求单后生成。')
     else:
         st.info('先选择并生成一份设计需求单，再生成完整设计方案。')
-    variants = st.selectbox('一次生成方案数', [1, 3], format_func=lambda n: '1 版（含图稿）' if n == 1 else '3 版对比（仅文字）',
+    variants = st.selectbox('一次生成方案数', [1, 3], index=[1, 3].index(default_variants), format_func=lambda n: '1 版（含图稿）' if n == 1 else '3 版对比（仅文字）',
                             key=f'demand-design-variants-{identifier}', disabled=busy)
     if variants == 3:
         st.caption('三版方案在概念、构图或配色上相互区分，只生成文字；选定一版后再生成图稿。')
@@ -693,11 +821,13 @@ def design_step(engine, run, source_brief, op):
     if not versions:
         return
     source_id = source_brief['id'] if source_brief else 'none'
-    current = next((i for i, v in enumerate(versions) if v['brief_id'] == source_id), 0)
+    choice = run.get('design_choice')
+    current = next((i for i, v in enumerate(versions) if v['id'] == choice and v['brief_id'] == source_id),
+                   next((i for i, v in enumerate(versions) if v['brief_id'] == source_id), 0))
     by_id = {v['id']: v for v in versions}
     selected = st.selectbox('设计方案历史版本', list(by_id), index=current,
         format_func=lambda k: f"设计版本 {by_id[k]['version']} · 来源需求单版本 {by_id[k]['brief_snapshot']['version']} · {by_id[k]['content']['title']}" + (' · 其他来源' if by_id[k]['brief_id'] != source_id else ''),
-        key=f"demand-design-history-{identifier}-{source_id}-{len(versions)}")
+        key=f"demand-design-history-{identifier}-{source_id}-{len(versions)}-{choice or ''}")
     design = by_id[selected]
     same_source = design['brief_id'] == source_id
     historical = stale(run, design) or design['selection'] != run['selection']

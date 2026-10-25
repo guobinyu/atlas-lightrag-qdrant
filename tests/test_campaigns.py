@@ -103,6 +103,10 @@ def work(tmp_path, monkeypatch):
     instance.llm = Model()
     from lab.image_service import ImageService
     instance.images = ImageService(tmp_path / "image-settings.json")
+    from lab.enterprises import Enterprises
+    instance.enterprises = Enterprises(tmp_path / 'enterprises.json')
+    from lab.culture.service import CultureService
+    instance.culture = CultureService(tmp_path / 'culture')
     instance.campaigns = CampaignService(instance)
     engine.workbench = instance
     yield instance

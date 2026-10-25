@@ -73,6 +73,7 @@ CANDIDATE_V4 = CANDIDATE_V3 + '''每个候选另需提供 "requirements":{"categ
 summary.inputs.capacity 是商家产能：categories 为可生产品类，crafts 为可用工艺，lead_days 为常规交期天数，monthly 为月产能，moq 为起订量。已提供 categories 时 category 必须从中选择；所需工艺不在 crafts 中时必须同时写入 capability_gaps；quantity 不能超过 monthly 在可用周期内的产量，也不能低于 moq；可用周期不能短于常规交期。summary.inputs.budget 中 price_min、price_max 为预算单价（元），quantity 为数量。
 topic.kind 为 calendar 时是未来的节日或消费节点，用来安排上市时间；为 manual 时是用户手动提供的热点；两者都未验证热度。topic_score 是程序按用户权重计算的预测评分，不是真实热度。potential 是你的判断，不得写成销量预测或爆款承诺。
 template_focus 存在时按其中的场景关注点设计候选，并在 assumptions 说明仍需商家确认的部分。round_to_fix、candidates_to_fix 和 capacity_violations 存在时，round_to_fix 是上一版完整候选，其中部分方向违反产能约束：修正或替换这些方向，其余方向尽量保留，数量不变。
+topics 是用户选择的 1–3 个话题（topic 为其中第一个），可以组合成一个方向，也可以分别对应不同候选；topic_scores 是各话题的预测评分，不是热度。
 '''
 BRIEF_V4 = BRIEF_V3 + '''另需提供产品方案包 "package"：{"positioning":"产品定位","audience":"目标人群","story":"文化故事摘要","materials":"面料与工艺建议","patterns":[{"direction":"纹样方向","element_ref":"可选，M 开头素材"}],"ip":[{"name":"IP 名称","usage":"使用方式","rights":"授权情况或待确认事项","element_ref":"可选"}],"pricing":{"low":数字,"high":数字,"basis":"定价依据"},"risks":[{"item":"风险","level":"高、中或低","response":"应对措施"}],"specs":[{"item":"规格项目","value":"建议值","status":"确认、建议或待定"}]}。
 pricing 是参考单价（元），需要报价验证；用户提供 budget 单价时，区间必须与预算单价区间有重叠。specs 只有用户明确确认的条件可标为确认，其余标为建议或待定。risks 至少一项，选市场、生产、授权、交期中真正相关的风险。没有可用 IP 或授权不明时 ip 可为空数组，不得编造授权。patterns 至少一项。
@@ -502,6 +503,26 @@ def find_topic(run, topic_id):
     return next((t for t in research['topics'] if t['id'] == topic_id), None) if research else None
 
 
+def selected_topic_ids(run):
+    """Ordered selection. binding() keeps a single id as a string so older results stay current."""
+    if run.get('topic_ids'):
+        return list(run['topic_ids'])
+    value = run.get('topic_id')
+    return [value] if isinstance(value, str) else list(value or [])
+
+
+def brief_topics(record):
+    """Topics behind a candidate context, brief or design source; old records stored only the first."""
+    return record.get('topics') or ([record['topic']] if record.get('topic') else [])
+
+
+def brief_topic_scores(record):
+    if record.get('topic_scores'):
+        return record['topic_scores']
+    topic, score = record.get('topic'), record.get('topic_score')
+    return {topic['id']: score} if topic and score and topic.get('id') else {}
+
+
 def topic_evidence(topic):
     """User and calendar topics are planning inputs, never citable facts."""
     text = topic['title'] + '。' + topic.get('fit', '')
@@ -535,6 +556,7 @@ class DemandService:
             run = json.loads(self._path(identifier).read_text(encoding='utf-8'))
         if run.get('schema_version') != 1 or run.get('workspace') != self.work.engine.settings.workspace:
             raise ValueError('需求任务版本或工作区不匹配。')
+        run['topic_ids'] = selected_topic_ids(run)
         return run
 
     def runs(self):
@@ -578,7 +600,7 @@ class DemandService:
                 run['revision'] += 1
                 run['inputs'] = inputs
                 run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(inputs), 'answers': deepcopy(answers), 'at': utc_now()})
-                run.update(approved_revision=None, research_id=None, topic_id=None, selection=None)
+                run.update(approved_revision=None, research_id=None, topic_id=None, topic_ids=[], selection=None)
                 self.save(run)
             return run
 
@@ -683,7 +705,7 @@ class DemandService:
                 run['inputs'] = inputs
                 run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(inputs),
                     'answers': answers, 'at': utc_now()})
-                run.update(research_id=None, topic_id=None, selection=None)
+                run.update(research_id=None, topic_id=None, topic_ids=[], selection=None)
             run['summaries'][-1]['exploration'] = exploration
             run['approved_revision'] = run['revision']
             self.save(run)
@@ -697,26 +719,66 @@ class DemandService:
             run['approved_revision'] = run['revision']
             self.save(run)
 
-    def select_topic(self, identifier, topic_id):
+    MAX_TOPICS = 3
+
+    def _check_topic(self, run, topic_id):
+        if topic_id.startswith('N-'):
+            node = next((n for n in self.calendar.upcoming(current_day()) if 'N-' + n['key'] == topic_id), None)
+            if not node:
+                raise ValueError('请选择未来 120 天内的日历节点。')
+            # Snapshot once: later calendar edits never change a selected topic.
+            if not any(t['id'] == topic_id for t in run.setdefault('calendar_topics', [])):
+                run['calendar_topics'].append(demand_scoring.calendar_topic(node))
+        elif topic_id.startswith('U'):
+            if not find_topic(run, topic_id):
+                raise ValueError('手动热点不存在。')
+        else:
+            research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
+            if not research or topic_id not in {t['id'] for t in research.get('topics', [])}:
+                raise ValueError('请选择当前资料版本中的话题。')
+
+    def set_topics(self, identifier, topic_ids):
+        if (not isinstance(topic_ids, list) or not 1 <= len(topic_ids) <= self.MAX_TOPICS
+                or any(not isinstance(t, str) for t in topic_ids) or len(set(topic_ids)) != len(topic_ids)):
+            raise ValueError(f'请选择 1–{self.MAX_TOPICS} 个不同话题。')
         with self.edit(identifier) as run:
-            if not isinstance(topic_id, str):
-                raise ValueError('请选择有效话题。')
-            if topic_id.startswith('N-'):
-                node = next((n for n in self.calendar.upcoming(current_day()) if 'N-' + n['key'] == topic_id), None)
-                if not node:
-                    raise ValueError('请选择未来 120 天内的日历节点。')
-                # Snapshot once: later calendar edits never change a selected topic.
-                if not any(t['id'] == topic_id for t in run.setdefault('calendar_topics', [])):
-                    run['calendar_topics'].append(demand_scoring.calendar_topic(node))
-            elif topic_id.startswith('U'):
-                if not find_topic(run, topic_id):
-                    raise ValueError('手动热点不存在。')
-            else:
-                research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
-                if not research or topic_id not in {t['id'] for t in research.get('topics', [])}:
-                    raise ValueError('请选择当前资料版本中的话题。')
-            if topic_id != run['topic_id']:
-                run.update(topic_id=topic_id, selection=None)
+            for topic_id in topic_ids:
+                self._check_topic(run, topic_id)
+            value = topic_ids[0] if len(topic_ids) == 1 else list(topic_ids)
+            if value != run['topic_id']:
+                run.update(topic_id=value, selection=None)
+            run['topic_ids'] = list(topic_ids)
+            self.save(run)
+
+    def select_topic(self, identifier, topic_id):
+        if not isinstance(topic_id, str):
+            raise ValueError('请选择有效话题。')
+        self.set_topics(identifier, [topic_id])
+
+    def save_picks(self, identifier, picks):
+        """Designer selections for the current direction; saved without a model call or a new revision."""
+        if not isinstance(picks, dict) or set(picks) - {'adopt', 'style', 'note'}:
+            raise ValueError('设计选择格式无效。')
+        note = picks.get('note') or ''
+        if not isinstance(note, str) or len(note) > 1000:
+            raise ValueError('保存说明需不超过 1000 字。')
+        with self.edit(identifier) as run:
+            if not run['selection']:
+                raise ValueError('请先选择一个当前产品候选。')
+            batch = next(r for r in run['candidate_rounds'] if r['id'] == run['selection']['round_id'])
+            changes, _ = element_changes({k: picks[k] for k in ('adopt', 'style') if picks.get(k)}, batch['context']['evidence'])
+            run['element_picks'] = {'selection': deepcopy(run['selection']), 'adopt': changes['adopt'] if changes else [],
+                                    'style': changes['style'] if changes else '', 'note': note.strip(), 'at': utc_now()}
+            self.save(run)
+            return run['element_picks']
+
+    def choose_design(self, identifier, design_id):
+        """Mark the confirmed design among current versions; no model call, no new revision."""
+        with self.edit(identifier) as run:
+            design = next((d for d in run.get('design_versions', []) if d['id'] == design_id), None)
+            if not design or stale(run, design) or design['selection'] != run['selection']:
+                raise ValueError('请选择当前条件及产品方向下的设计方案。')
+            run['design_choice'] = design_id
             self.save(run)
 
     def add_manual_topic(self, identifier, title, note='', url='', day=None):
@@ -753,11 +815,12 @@ class DemandService:
         snapshots = {t['id']: t for t in run.get('calendar_topics', [])}
         upcoming = [demand_scoring.calendar_topic(n) for n in self.calendar.upcoming(today)]
         items += [deepcopy(snapshots.get(t['id'], t)) for t in upcoming]
+        chosen = selected_topic_ids(run)
         # A selected node stays listed from its snapshot even after the calendar changes.
-        if run['topic_id'] in snapshots and all(t['id'] != run['topic_id'] for t in upcoming):
-            items.append(deepcopy(snapshots[run['topic_id']]))
+        items += [deepcopy(snapshots[i]) for i in chosen if i in snapshots and all(t['id'] != i for t in upcoming)]
         for t in items:
             t['score'] = demand_scoring.score(t, run, today)
+            t['selected'] = t['id'] in chosen
         return sorted(items, key=lambda t: (t['score']['score'] is None, -(t['score']['score'] or 0)))
 
     def select_candidate(self, identifier, round_id, candidate_id):
@@ -794,13 +857,13 @@ class DemandService:
             return run, op
         from lab.demand_design import KINDS as DESIGN_KINDS, FORMAT_VERSION as DESIGN_FORMAT_VERSION
         from lab import demand_images
-        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise', *DESIGN_KINDS, *demand_images.KINDS):
+        if kind not in ('demand_analyze', 'demand_search', 'demand_candidates', 'demand_brief', 'demand_revise', 'demand_pipeline', *DESIGN_KINDS, *demand_images.KINDS):
             raise ValueError('未知需求操作。')
         if kind != 'demand_analyze' and run['approved_revision'] != run['revision']:
             raise ValueError('请先按当前需求继续。')
         if kind == 'demand_candidates' and run['inputs']['path'] == 'trend' and not run['topic_id']:
             raise ValueError('请先选择话题。')
-        if kind in ('demand_brief', 'demand_revise') and not run['selection']:
+        if kind in ('demand_brief', 'demand_revise', 'demand_pipeline') and not run['selection']:
             raise ValueError('请先选择一个当前产品候选。')
         count = inputs.get('count', 3)
         if count not in (3, 5):
@@ -841,9 +904,17 @@ class DemandService:
                 instruction = '\n'.join(x for x in (instruction.strip(), extra) if x)
             if not base or stale(run, base) or base['selection'] != run['selection'] or not instruction.strip():
                 raise ValueError('请选择当前候选的需求单，并填写修改意见。')
+        if kind in ('demand_brief', 'demand_pipeline'):
+            batch = next(r for r in run['candidate_rounds'] if r['id'] == run['selection']['round_id'])
+            changes, extra = element_changes(inputs.get('element_changes'), batch['context']['evidence'])
+            instruction = '\n'.join(x for x in (instruction.strip(), extra) if x)
+        if kind == 'demand_pipeline':
+            if not self.work.images.configured:
+                raise ValueError('请先在模型设置中配置图片服务，再下发纹样任务。')
+            self.work.images.settings.validate()
         if kind == 'demand_search':
             # Starting a new search makes previous results historical, without deleting them.
-            run.update(research_id=None, topic_id=None, selection=None)
+            run.update(research_id=None, topic_id=None, topic_ids=[], selection=None)
         if kind == 'demand_analyze' and not inputs.get('session_id') and len(clarification_rounds(run)) >= MAX_CLARIFICATION_ROUNDS:
             raise ValueError('已完成需求澄清，请直接确认需求。')
         session = None
@@ -859,7 +930,7 @@ class DemandService:
             run['revision'] += 1
             run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(run['inputs']),
                                     'answers': answers, 'at': utc_now()})
-            run.update(approved_revision=None, research_id=None, topic_id=None, selection=None)
+            run.update(approved_revision=None, research_id=None, topic_id=None, topic_ids=[], selection=None)
             session['status'] = 'submitted'
         op = {'id': uuid.uuid4().hex, 'format_version': CONTENT_FORMAT_VERSION, 'kind': kind, 'status': 'running', 'stage': '准备任务', 'created_at': utc_now(),
               'binding': binding(run), 'selection': deepcopy(run['selection']), 'input_snapshot': deepcopy(run['summaries'][-1]),
@@ -872,6 +943,9 @@ class DemandService:
             op['variants'] = variants
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
+        if kind == 'demand_pipeline':
+            op.update(design_format_version=DESIGN_FORMAT_VERSION, include_images=True, image_mode='pattern',
+                      image_config=self.work.images.settings.public())
         if source_brief is not None and inputs.get('include_images', False):
             if not self.work.images.configured:
                 raise ValueError('请先配置图片服务，再生成包含图稿的设计方案。')
@@ -1000,27 +1074,30 @@ class DemandService:
     async def context(self, run, op, job):
         if 'context' in op['cache']:
             return op['cache']['context']
-        evidence, topic = {}, None
+        evidence, topics = {}, []
         if run['inputs']['path'] == 'custom' and not run['topic_id']:
             if not run['research_id']:
                 await self.discover(run, op, job)
             research = next(r for r in run['research'] if r['id'] == run['research_id'])
             # Custom exploration may use the first suggested topic unless the user selects one.
             run['topic_id'] = research['topics'][0]['id']
+            run['topic_ids'] = [run['topic_id']]
             op['binding'] = binding(run)
             self.save(run)
-        if run['topic_id']:
-            topic = deepcopy(find_topic(run, run['topic_id']))
+        for topic_id in selected_topic_ids(run):
+            topic = deepcopy(find_topic(run, topic_id))
             if topic is None:
                 raise ValueError('所选话题不存在，请重新选择。')
             topic.setdefault('kind', 'search')
             if topic['kind'] == 'search':
                 research = next(r for r in run['research'] if r['id'] == run['research_id'])
-                evidence = {s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']}
+                evidence.update({s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']})
             else:
-                evidence = {topic['id']: topic_evidence(topic)}
+                evidence[topic['id']] = topic_evidence(topic)
+            topics.append(topic)
+        topic = topics[0] if topics else None
         self.checkpoint(run, op, job, '检索本地相关资料')
-        query = ' '.join([op['input_snapshot']['inputs'].get(k, '') for k in ('purpose', 'audience', 'scene', 'theme', 'request', 'industry', 'capabilities')] + [topic['title'] if topic else ''])[:2000]
+        query = ' '.join([op['input_snapshot']['inputs'].get(k, '') for k in ('purpose', 'audience', 'scene', 'theme', 'request', 'industry', 'capabilities')] + [t['title'] for t in topics])[:2000]
         chunks = await self.work.engine.campaign_context(query)
         evidence.update({'K' + str(i): c for i, c in enumerate(chunks[:5], 1)})
         self.checkpoint(run, op, job, '匹配文化素材')
@@ -1029,11 +1106,98 @@ class DemandService:
         evidence.update({'M' + str(i): e for i, e in enumerate(elements, 1)})
         value = {'summary': deepcopy(op['input_snapshot']), 'topic': deepcopy(topic), 'evidence': deepcopy(evidence),
                  'knowledge_missing': not chunks, 'culture_missing': not elements, 'instruction': op['instruction']}
-        if topic:
-            value['topic_score'] = demand_scoring.score(topic, run, current_day())
+        if topics:
+            scores = {t['id']: demand_scoring.score(t, run, current_day()) for t in topics}
+            value.update(topics=deepcopy(topics), topic_scores=scores, topic_score=scores[topic['id']])
         op['cache']['context'] = value
         self.save(run)
         return value
+
+    async def _design(self, run, op, job, check_changes=True):
+        from lab import demand_design
+        if op['design_format_version'] != demand_design.FORMAT_VERSION:
+            raise ValueError('设计方案格式不支持，请保留历史并重新生成。')
+        brief = op['brief_snapshot']
+        versions = run.setdefault('design_versions', [])
+        count, generated = op.get('variants', 1), []
+        def validate(v):
+            demand_design.validate(v, brief)
+            if check_changes and op.get('element_changes'):
+                check_element_changes(v, op['element_changes'])
+        for i in range(1, count + 1):
+            vid = op['id'] if i == 1 else f"{op['id']}-v{i}"
+            stage = '修订文字设计方案' if op['kind'] == 'demand_design_revise' else '生成完整文字设计方案'
+            self.checkpoint(run, op, job, stage + (f' {i}/{count}' if count > 1 else ''))
+            value = await self.ask(run, op, 'design' if i == 1 else f'design_{i}', demand_design.PROMPT,
+                demand_design.model_input(brief, op['base'], op['instruction'], [g['content'] for g in generated]),
+                validate, system_prompt=demand_design.SYSTEM)
+            if not any(v['id'] == vid for v in versions):
+                record = {'id': vid, 'version': len(versions) + 1, 'content_version': op['design_format_version'],
+                    'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
+                    'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
+                    'instruction': op['instruction'], 'content': value}
+                if count > 1:
+                    record.update(group_id=op['id'], variant=i, variants=count)
+                versions.append(record)
+                # Save each variant and the text before images; retries reuse saved results.
+                self.save(run)
+            generated.append(next(v for v in versions if v['id'] == vid))
+        if op.get('include_images'):
+            from lab import demand_images
+            from lab.image_service import image_sizes
+            if 'design_snapshot' not in op:
+                design = next(v for v in versions if v['id'] == op['id'])
+                if op.get('image_mode') == 'pattern':
+                    op.update(design_snapshot=deepcopy(design), image_base=None, **demand_images.pattern_target(op['image_config']['provider']))
+                else:
+                    apps = design['content']['applications']
+                    index = next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0)
+                    op.update(design_snapshot=deepcopy(design), application_index=index,
+                              application=deepcopy(apps[index]), image_base=None,
+                              size=image_sizes(op['image_config']['provider'])[0])
+                self.save(run)
+            await demand_images.execute(self, run, op, job)
+
+    async def _brief(self, run, op, job, format_version):
+        selected = op['selection']
+        batch = next(r for r in run['candidate_rounds'] if r['id'] == selected['round_id'])
+        candidate = next(c for c in batch['candidates'] if c['id'] == selected['candidate_id'])
+        context = batch['context']
+        self.checkpoint(run, op, job, '细化设计需求单')
+        def check(v):
+            texts(v, ('title', *BRIEF_FIELDS))
+            strings(v.get('assumptions'), '策划假设')
+            if format_version >= 2:
+                check_followups(v)
+            else:
+                strings(v.get('questions'), '待确认事项')
+            if format_version >= 3:
+                check_story_mapping(v)
+                check_element_refs(v['story_mapping'], context['evidence'])
+                check_deliverables(v)
+            if format_version >= 4:
+                check_package(v, context['summary']['inputs'], context['evidence'])
+            if op.get('element_changes'):
+                check_element_changes(v, op['element_changes'])
+            check_facts(v, context['evidence'])
+        legacy_prompt = 'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。'
+        data = {'context': context, 'candidate': candidate, 'base': op['base'], 'instruction': op['instruction']}
+        if format_version >= 3:
+            data['decision_context'] = decision_context(op['input_snapshot'], candidate)
+        template = context['summary']['inputs'].get('template')
+        if format_version >= 4 and template:
+            data['template_focus'] = TEMPLATES[template]['focus']
+        value = await self.ask(run, op, 'brief',
+            ({4: BRIEF_V4, 3: BRIEF_V3}.get(min(format_version, 4), BRIEF_V2) + PROACTIVE_RULES) if format_version >= 2 else legacy_prompt,
+            data, check)
+        if not any(b['id'] == op['id'] for b in run['briefs']):
+            run['briefs'].append({'id': op['id'], 'format_version': format_version, 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
+                'selection': deepcopy(selected), 'summary': deepcopy(op['input_snapshot']), 'evidence': deepcopy(context['evidence']),
+                'knowledge_missing': context['knowledge_missing'], 'culture_missing': context.get('culture_missing', True),
+                'topic': deepcopy(context['topic']), 'topic_score': deepcopy(context.get('topic_score')),
+                'topics': deepcopy(brief_topics(context)), 'topic_scores': deepcopy(brief_topic_scores(context)),
+                'candidate': deepcopy(candidate), 'content': value})
+        return next(b for b in run['briefs'] if b['id'] == op['id'])
 
     async def execute(self, run, op, job):
         kind = op['kind']
@@ -1069,49 +1233,7 @@ class DemandService:
             from lab import demand_images
             await demand_images.execute(self, run, op, job)
         elif kind in ('demand_design_generate', 'demand_design_revise'):
-            from lab import demand_design
-            if op['design_format_version'] != demand_design.FORMAT_VERSION:
-                raise ValueError('设计方案格式不支持，请保留历史并重新生成。')
-            brief = op['brief_snapshot']
-            versions = run.setdefault('design_versions', [])
-            count, generated = op.get('variants', 1), []
-            def validate(v):
-                demand_design.validate(v, brief)
-                if op.get('element_changes'):
-                    check_element_changes(v, op['element_changes'])
-            for i in range(1, count + 1):
-                vid = op['id'] if i == 1 else f"{op['id']}-v{i}"
-                stage = '生成完整文字设计方案' if kind == 'demand_design_generate' else '修订文字设计方案'
-                self.checkpoint(run, op, job, stage + (f' {i}/{count}' if count > 1 else ''))
-                value = await self.ask(run, op, 'design' if i == 1 else f'design_{i}', demand_design.PROMPT,
-                    demand_design.model_input(brief, op['base'], op['instruction'], [g['content'] for g in generated]),
-                    validate, system_prompt=demand_design.SYSTEM)
-                if not any(v['id'] == vid for v in versions):
-                    record = {'id': vid, 'version': len(versions) + 1, 'content_version': op['design_format_version'],
-                        'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
-                        'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
-                        'instruction': op['instruction'], 'content': value}
-                    if count > 1:
-                        record.update(group_id=op['id'], variant=i, variants=count)
-                    versions.append(record)
-                    # Save each variant and the text before images; retries reuse saved results.
-                    self.save(run)
-                generated.append(next(v for v in versions if v['id'] == vid))
-            if op.get('include_images'):
-                from lab import demand_images
-                from lab.image_service import image_sizes
-                if 'design_snapshot' not in op:
-                    design = next(v for v in versions if v['id'] == op['id'])
-                    if op.get('image_mode') == 'pattern':
-                        op.update(design_snapshot=deepcopy(design), image_base=None, **demand_images.pattern_target(op['image_config']['provider']))
-                    else:
-                        apps = design['content']['applications']
-                        index = next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0)
-                        op.update(design_snapshot=deepcopy(design), application_index=index,
-                                  application=deepcopy(apps[index]), image_base=None,
-                                  size=image_sizes(op['image_config']['provider'])[0])
-                    self.save(run)
-                await demand_images.execute(self, run, op, job)
+            await self._design(run, op, job)
         elif kind == 'demand_candidates':
             context = await self.context(run, op, job)
             self.checkpoint(run, op, job, '生成产品候选')
@@ -1161,43 +1283,15 @@ class DemandService:
                 if format_version >= 4:
                     record['capacity_log'] = capacity_log
                 run['candidate_rounds'].append(record)
+        elif kind == 'demand_pipeline':
+            # Brief → one design → three pattern drafts in one operation; each step is cached for retries.
+            brief = await self._brief(run, op, job, format_version)
+            if 'brief_snapshot' not in op:
+                op['brief_snapshot'] = deepcopy(brief)
+                self.save(run)
+            await self._design(run, op, job, check_changes=False)
         else:
-            selected = op['selection']
-            batch = next(r for r in run['candidate_rounds'] if r['id'] == selected['round_id'])
-            candidate = next(c for c in batch['candidates'] if c['id'] == selected['candidate_id'])
-            context = batch['context']
-            self.checkpoint(run, op, job, '细化设计需求单')
-            def check(v):
-                texts(v, ('title', *BRIEF_FIELDS))
-                strings(v.get('assumptions'), '策划假设')
-                if format_version >= 2:
-                    check_followups(v)
-                else:
-                    strings(v.get('questions'), '待确认事项')
-                if format_version >= 3:
-                    check_story_mapping(v)
-                    check_element_refs(v['story_mapping'], context['evidence'])
-                    check_deliverables(v)
-                if format_version >= 4:
-                    check_package(v, context['summary']['inputs'], context['evidence'])
-                if op.get('element_changes'):
-                    check_element_changes(v, op['element_changes'])
-                check_facts(v, context['evidence'])
-            legacy_prompt = 'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。'
-            data = {'context': context, 'candidate': candidate, 'base': op['base'], 'instruction': op['instruction']}
-            if format_version >= 3:
-                data['decision_context'] = decision_context(op['input_snapshot'], candidate)
-            template = context['summary']['inputs'].get('template')
-            if format_version >= 4 and template:
-                data['template_focus'] = TEMPLATES[template]['focus']
-            value = await self.ask(run, op, 'brief',
-                ({4: BRIEF_V4, 3: BRIEF_V3}.get(min(format_version, 4), BRIEF_V2) + PROACTIVE_RULES) if format_version >= 2 else legacy_prompt,
-                data, check)
-            if not any(b['id'] == op['id'] for b in run['briefs']):
-                run['briefs'].append({'id': op['id'], 'format_version': format_version, 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
-                    'selection': deepcopy(selected), 'summary': deepcopy(op['input_snapshot']), 'evidence': deepcopy(context['evidence']),
-                    'knowledge_missing': context['knowledge_missing'], 'culture_missing': context.get('culture_missing', True),
-                    'topic': deepcopy(context['topic']), 'topic_score': deepcopy(context.get('topic_score')), 'candidate': deepcopy(candidate), 'content': value})
+            await self._brief(run, op, job, format_version)
         op.update(status='success', message='本阶段完成，请查看结果并选择下一步。', finished_at=utc_now())
         self.save(run)
         job.update(status='success', message=op['message'])
@@ -1291,10 +1385,10 @@ def brief_sections(run, brief):
         notes += [f"- 用户已采纳（{FIELDS[a['field']]}）：{a['value']}；来源需求版本：{a['source_revision']}" for a in exploration.get('adoptions', [])]
         sections.append(('历史需求探索记录' if brief.get('format_version', 1) >= 3 else '需求探索记录', '\n'.join(notes), True))
     refs = []
-    if brief.get('topic'):
-        topic = brief['topic']
+    scores = brief_topic_scores(brief)
+    for topic in brief_topics(brief):
         refs += [topic['title'], topic_note(topic)]
-        score = (brief.get('topic_score') or {}).get('score')
+        score = (scores.get(topic['id']) or {}).get('score')
         if score is not None:
             refs.append(f"话题预测评分：{score:.2f}（{demand_scoring.NOTE}）")
     for fact in value['facts']:
@@ -1305,3 +1399,35 @@ def brief_sections(run, brief):
         refs.append('未检索到相关本地知识，相关创意不代表获得专业知识库支持。')
     sections.append(('参考资料与来源', '\n\n'.join(refs) or '无外部参考资料。', True))
     return sections
+
+
+def round_markdown(run, batch):
+    """One candidate round for discussion: conditions, topics, comparison, candidates and sources. No model call."""
+    context = batch['context']
+    inputs = context['summary']['inputs']
+    lines = [f"# 产品候选对比 · 轮次 {batch['id'][:6]}", '',
+             f"任务：{run['id']} · 需求版本：{batch['binding']['revision']} · 生成时间：{batch['at']}", '', '## 商家条件', '']
+    lines += [f"- {FIELDS[k]}：{inputs.get(k) or '未提供'}" for k in MERCHANT_FIELDS] + ['- ' + x for x in structured_lines(inputs)]
+    topics, scores = brief_topics(context), brief_topic_scores(context)
+    if topics:
+        lines += ['', '## 选题', '']
+        for t in topics:
+            score = (scores.get(t['id']) or {}).get('score')
+            lines.append(f"- {t['title']}：{topic_note(t)}" + (f" 预测评分 {score:.2f}（{demand_scoring.NOTE}）" if score is not None else ''))
+    if batch.get('format_version', 1) >= 3:
+        rows = candidate_comparison(batch)
+        cell = lambda v: str(v).replace('|', '｜').replace('\n', ' ')
+        lines += ['', '## 方案对比', '', '| ' + ' | '.join(rows[0]) + ' |', '|' + '---|' * len(rows[0])]
+        lines += ['| ' + ' | '.join(cell(v) for v in row.values()) + ' |' for row in rows]
+    for c in batch['candidates']:
+        lines += ['', f"## {c['id']} · {c['name']}", '', f"- 产品形态：{c['form']}", f"- 人群与场景：{c['audience']} · {c['scene']}",
+                  f"- 推荐理由：{c['reason']}", f"- 能力匹配：{c['capability_fit']}"]
+        if c.get('story'):
+            lines.append(f"- 文化故事：{c['story']}")
+        if c.get('potential'):
+            lines.append(f"- 爆款潜力（模型判断）：{c['potential']['score']}/5，{c['potential']['reason']}")
+        lines += [f"- 假设：{a}" for a in c.get('assumptions', [])]
+    if batch.get('capacity_log'):
+        lines += ['', '## 产能检查记录', ''] + [f"- {x['name']}：{'；'.join(x['problems'])}（已自动修正）" for x in batch['capacity_log']]
+    lines += ['', '## 参考资料', ''] + [f"- [{k}] {v.get('title') or v.get('file_path') or '知识库片段'}" for k, v in context['evidence'].items()]
+    return '\n'.join(lines) + '\n'

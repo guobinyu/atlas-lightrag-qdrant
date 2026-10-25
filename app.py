@@ -12,7 +12,7 @@ from lab.trace import list_runs, replay_state
 from lab.workbench_ui import header, navigation, render
 
 
-st.set_page_config(page_title="Atlas · 知识工作台", page_icon="◈", layout="wide")
+st.set_page_config(page_title="智能设计平台", page_icon="◈", layout="wide", initial_sidebar_state="collapsed")
 st.markdown((ROOT / "assets/style.css").read_text(encoding="utf-8"), unsafe_allow_html=True)
 
 
@@ -74,7 +74,7 @@ except Exception as exc:
     st.info("请检查项目中的 .env 与 README。首次启动需要网络下载模型，配置修改后请重启应用。")
     st.stop()
 
-route = navigation()
+route = navigation(engine)
 if route != "retrieve":
     render(engine, route)
     st.stop()

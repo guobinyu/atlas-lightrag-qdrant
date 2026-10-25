@@ -3,6 +3,41 @@ import html
 import plotly.graph_objects as go
 
 
+# Validated categorical slots 1–4 (light surface). Two sit below 3:1 contrast, so the chart
+# always ships a legend and a table view next to it.
+SCORE_COLORS = {'timeliness': '#2a78d6', 'proximity': '#eb6834', 'fit': '#1baf7a', 'heat': '#eda100'}
+
+
+def score_contributions(score):
+    """Weighted share of each present component; the shares sum to the topic's prediction score."""
+    present = score['components']
+    total = sum(score['weights'][k] for k in present)
+    return {k: (score['weights'][k] * present[k] / total if total else 0.0) for k in SCORE_COLORS if k in present}
+
+
+def score_breakdown(topics, labels, limit=8):
+    rows = [t for t in topics if t['score']['score'] is not None][:limit]
+    names = [f"{i}. {t['title'][:14]}" for i, t in enumerate(rows, 1)]
+    figure = go.Figure()
+    for key, color in SCORE_COLORS.items():
+        values = [round(score_contributions(t['score']).get(key, 0.0), 3) for t in rows]
+        figure.add_trace(go.Bar(
+            y=names, x=values, name=labels[key], orientation='h',
+            # The white outline is the 2px surface gap between stacked segments.
+            marker={'color': color, 'line': {'color': '#ffffff', 'width': 2}},
+            customdata=[[t['title']] for t in rows],
+            hovertemplate='%{customdata[0]}<br>' + labels[key] + ' 贡献 %{x:.2f}<extra></extra>'))
+    figure.update_layout(
+        barmode='stack', bargap=0.42, height=90 + 34 * max(len(rows), 1), margin={'l': 8, 'r': 8, 't': 36, 'b': 36},
+        paper_bgcolor='#ffffff', plot_bgcolor='#ffffff', font={'family': 'PingFang SC, Microsoft YaHei, sans-serif', 'color': '#213D3A', 'size': 12},
+        legend={'orientation': 'h', 'y': 1.02, 'yanchor': 'bottom', 'x': 0, 'font': {'color': '#5B706B'}},
+        xaxis={'range': [0, 1], 'title': {'text': '预测评分（非真实热度）', 'font': {'color': '#5B706B', 'size': 11}},
+               'gridcolor': '#E6EBE6', 'zeroline': False, 'tickfont': {'color': '#5B706B'}},
+        yaxis={'autorange': 'reversed', 'tickfont': {'color': '#213D3A'}},
+        hoverlabel={'bgcolor': '#ffffff', 'font': {'color': '#213D3A'}})
+    return figure
+
+
 def short_title(content, length=24):
     first = next((line.lstrip("# ").strip() for line in content.splitlines() if line.strip()), "未命名片段")
     return first[:length] + ("…" if len(first) > length else "")

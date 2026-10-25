@@ -10,7 +10,8 @@ from lab.graph import graph_figure, subgraph
 from lab.llm import LLMSettings
 from lab.sources import MAX_BYTES, parse_document, search_web
 
-PAGES = {"collect": "资料工作台", "demand": "产品需求探索", "campaign": "热点营销", "graph": "知识图谱", "semantic": "标准语义图谱", "culture": "文化知识库", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "模型设置"}
+PAGES = {"home": "首页", "predict": "爆款预测", "custom": "定制设计", "culture": "知识库", "pattern": "纹样设计", "campaign": "营销生成",
+         "demand": "产品需求探索", "collect": "资料工作台", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "系统设置"}
 STATUS = {"collected": "待构建", "pending": "等待处理", "indexing": "构建中", "processing": "处理中", "processed": "已入库", "failed": "失败", "interrupted": "中断", "preprocessed": "待完成"}
 EVENTS = {"job.started": "任务开始", "source.fetching": "读取网页正文", "source.collected": "资料已保存", "source.failed": "资料读取失败", "document.started": "文档切块与抽取", "llm.started": "调用抽取模型", "llm.completed": "模型返回", "llm.failed": "模型调用失败", "document.completed": "图谱与向量已写入", "document.failed": "文档构建失败", "indexes.refreshing": "读取最新索引", "build.completed": "构建完成", "collection.completed": "采集完成", "job.failed": "任务失败"}
 EVENTS.update({"embedding.started": "向量化开始", "embedding.completed": "向量化完成", "vectors.written": "Qdrant 写入完成"})
@@ -22,22 +23,22 @@ EVENTS['demand.progress'] = '产品需求探索进度'
 EVENTS.update({'culture.chunk.started': '文化解码文本块开始', 'culture.chunk.completed': '文化素材已入库', 'culture.chunk.failed': '文化解码文本块失败', 'culture.index.started': '更新文化素材向量'})
 
 
-def navigation():
-    route = st.query_params.get("view", "collect")
+def navigation(engine):
+    """Top navigation replaces the old sidebar list. ?view= stays the route so old links keep working."""
+    from lab.ui_kit import top_nav, workbench_for
+    route = st.query_params.get("view", "home")
     if route not in PAGES:
-        route = "collect"
-    if st.session_state.get("navigation_url") != route:
-        st.session_state.workspace_page = route
-        st.session_state.navigation_url = route
-    with st.sidebar:
-        st.markdown('<div class="brand"><div class="brand-icon">◈</div><div>Atlas<small>KNOWLEDGE WORKSPACE</small></div></div>', unsafe_allow_html=True)
-        st.markdown('<div class="side-label">工作区导航</div>', unsafe_allow_html=True)
-        choice = st.radio("工作区导航", list(PAGES), index=None, format_func=PAGES.get, key="workspace_page", label_visibility="collapsed", width="stretch")
-        if choice != route:
-            st.query_params["view"] = choice
-            st.session_state.navigation_url = choice
-        st.divider()
-    return choice
+        route = "home"
+    if route == "demand":
+        # The combined page split into two workbenches; send the link to the task's own workbench.
+        identifier = st.query_params.get("demand")
+        try:
+            target = workbench_for(engine.workbench.demands.load(identifier)) if identifier else "predict"
+        except (ValueError, OSError):
+            target = "predict"
+        st.query_params["view"] = route = target
+    top_nav(engine, route)
+    return route
 
 
 def header(title, subtitle, tag="ATLAS / KNOWLEDGE WORKSPACE"):
@@ -77,7 +78,7 @@ def job_panel(engine):
         a.caption(f"{('产品需求探索' if job['kind'].startswith('demand_') else '热点营销' if job['kind'].startswith('campaign_') else '本体图谱构建' if job['kind'].startswith('semantic') else '文化解码' if job['kind'].startswith('culture_') else '资料采集' if job['kind'] == 'collect' else 'LightRAG 构建')} · {created} 北京时间 · #{job['id'][:8]}")
         if job['kind'].startswith('demand_'):
             st.write('当前阶段：' + job.get('phase', '准备任务'))
-            st.link_button('查看产品需求', '/?view=demand&demand=' + job['demand_id'])
+            st.link_button('查看任务', '/?view=demand&demand=' + job['demand_id'])
         if job['kind'].startswith('campaign_'):
             st.caption(' → '.join(['理解需求', '搜集资料', '推理品牌与产品', '品牌匹配', '生成方案']))
             st.write('当前阶段：' + job.get('phase', '理解需求'))
@@ -420,12 +421,47 @@ def vector_page(engine):
 
 def settings_page(engine):
     work = engine.workbench
-    header("模型与服务设置", "文字模型负责需求分析与设计方案，图片模型负责生成与修改图稿。两类服务独立配置。", "ATLAS / MODEL CONNECTIONS")
-    text_tab, image_tab = st.tabs(["文字模型", "图片模型"])
+    header("系统设置", "文字模型负责需求分析与设计方案，图片模型负责生成与修改图稿；企业档案和节日日历供爆款预测与定制设计使用。", "ATLAS / SETTINGS")
+    text_tab, image_tab, enterprise_tab, calendar_tab = st.tabs(["文字模型", "图片模型", "企业档案", "节日日历"])
     with text_tab:
         text_settings_panel(engine)
     with image_tab:
         image_settings_panel(work)
+    with enterprise_tab:
+        enterprise_settings(engine)
+    with calendar_tab:
+        from lab.demand_ui import calendar_editor
+        calendar_editor(engine)
+
+
+def enterprise_settings(engine):
+    from lab.demand_ui import action, capacity_form
+    store = engine.workbench.enterprises
+    busy = engine.workbench.active is not None
+    profiles = store.list()
+    names = {p['id']: p['name'] for p in profiles}
+    target = st.selectbox("编辑对象", [None, *names], format_func=lambda k: names.get(k, "新增企业档案"), key="enterprise-target")
+    base = store.get(target) if target else {}
+    key = f"enterprise-{target or 'new'}-"
+    with st.form(key + "form"):
+        value = {"name": st.text_input("企业名称", base.get("name", ""), max_chars=60)}
+        a, b = st.columns(2)
+        value["industry"] = a.text_input("行业", base.get("industry", ""), max_chars=4000)
+        value["brand"] = b.text_input("品牌名称（选填）", base.get("brand", ""), max_chars=4000)
+        value["capabilities"] = st.text_area("生产能力", base.get("capabilities", ""), max_chars=4000)
+        value["constraints"] = st.text_area("已知限制（选填）", base.get("constraints", ""), max_chars=4000)
+        value["capacity"], _ = capacity_form({"capacity": base.get("capacity", {})}, key, busy, wrap=False, budget=False)
+        save = st.form_submit_button("保存档案", type="primary", disabled=busy)
+    st.caption("选择档案只会预填任务；已有任务保留各自的信息，修改档案不改写历史任务。")
+    if save:
+        ok, _ = action(engine, store.save, value, target)
+        if ok:
+            st.success("已保存企业档案。")
+    if target and st.button("删除此档案", key=key + "delete", disabled=busy):
+        ok, _ = action(engine, store.remove, target)
+        if ok:
+            st.session_state.pop("enterprise-target", None)
+            st.rerun()
 
 
 def text_settings_panel(engine):
@@ -534,21 +570,18 @@ def image_settings_panel(work):
 
 
 def render(engine, route):
-    with st.sidebar:
-        st.caption("当前知识库")
-        st.markdown("**" + engine.settings.workspace + "**")
-        st.caption("● 抽取模型已配置" if engine.workbench.llm.configured else "○ 抽取模型待配置")
-        st.caption("● 中文向量模型已就绪")
-        st.caption("● Qdrant 本地引擎" if engine.settings.qdrant_mode == "local" else "● Qdrant Server")
-        st.divider()
-        st.caption("搜集资料 · 探索知识 · 生成方案")
     from lab.ontology.ui import semantic_page
     from lab.campaign_ui import campaign_page
     from lab.demand_ui import demand_page
     from lab.culture.ui import culture_page
+    from lab.home_ui import home_page
+    from lab.predict_ui import predict_page
+    from lab.custom_ui import custom_page
+    from lab.pattern_ui import pattern_page
     try:
-        {"demand": demand_page, "campaign": campaign_page, "semantic": semantic_page, "culture": culture_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
+        {"home": home_page, "predict": predict_page, "custom": custom_page, "pattern": pattern_page,
+         "demand": demand_page, "campaign": campaign_page, "semantic": semantic_page, "culture": culture_page, "collect": collect_page, "graph": graph_page, "vectors": vector_page, "settings": settings_page}[route](engine)
     except Exception as exc:
         from lab.engine import safe_error
         st.error(safe_error(exc, engine.settings))
-    st.markdown('<div class="footer">ATLAS · 让文化知识有迹可循</div>', unsafe_allow_html=True)
+    st.markdown('<div class="footer">智能设计平台 · 让文化知识有迹可循</div>', unsafe_allow_html=True)

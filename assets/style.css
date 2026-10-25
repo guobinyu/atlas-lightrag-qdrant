@@ -3,6 +3,7 @@
 :root {
   --ink:#213D3A; --muted:#5B706B; --teal:#16786b; --paper:#F4F6F3;
   --surface:#fff; --line:#dfe6df; --soft:#edf3ee; --radius:16px;
+  --water-blue:#2F5D8A; --silk-gold:#B68B43; --festive-red:#A83232; --ink-green:#2E5E4E;
 }
 html,body,.stApp,[data-testid="stMarkdownContainer"] {
   font-family:-apple-system,BlinkMacSystemFont,'PingFang SC','Microsoft YaHei',sans-serif;
@@ -22,23 +23,10 @@ h3 { font-size:20px!important; line-height:1.5!important; padding-top:.3rem!impo
 .eyebrow { font-size:10px; font-weight:650; letter-spacing:1.8px; color:var(--teal); margin:0 0 12px; }
 .eyebrow span { display:inline-block; margin-left:18px; color:var(--muted); letter-spacing:.6px; font-weight:400; }
 .subtitle { font-size:14px; line-height:1.8; color:var(--muted); max-width:850px; margin:0; }
-/* Navigation retains native radio semantics and keyboard support. */
 [data-testid="stSidebar"] { background:#EDF1EC; border-right:1px solid #dce4dc; }
 [data-testid="stSidebar"] > div:first-child { padding-top:1.5rem; }
 [data-testid="stSidebar"] [data-testid="stMarkdownContainer"] p { font-size:13px; }
 [data-testid="stSidebar"] hr { margin:.7rem 0; }
-.brand { display:flex; align-items:center; gap:11px; font-size:25px; font-weight:700; letter-spacing:-.8px; margin:0 0 27px; }
-.brand-icon { width:43px; height:43px; border-radius:13px; background:#205e51; color:#fff; display:grid; place-items:center; font-size:30px; }
-.brand small { display:block; font-size:9px; letter-spacing:1.3px; font-weight:500; color:var(--muted); margin-top:3px; }
-.side-label { font-size:11px; color:var(--muted); letter-spacing:1px; margin-bottom:8px; }
-.st-key-workspace_page [role="radiogroup"] { gap:5px; width:100%; }
-.st-key-workspace_page [role="radiogroup"] > div { width:100%; }
-.st-key-workspace_page [data-testid="stRadioOption"] { display:flex; box-sizing:border-box; }
-.st-key-workspace_page label { width:100%; padding:10px 12px; border:1px solid transparent; border-radius:10px; margin:0; transition:background .15s; }
-.st-key-workspace_page label:has(input:focus-visible) { outline:2px solid #43a495; outline-offset:2px; }
-.st-key-workspace_page label:hover { background:#ffffff80; }
-.st-key-workspace_page label:has(input:checked) { background:#fff; border-color:#dce5db; color:#126b60; box-shadow:0 2px 8px #23493c06; }
-.st-key-workspace_page label p { font-size:14px!important; font-weight:550; }
 /* Forms, controls and accessible focus states. */
 [data-testid="stForm"] { background:var(--surface); border:1px solid var(--line); border-radius:var(--radius); padding:20px; }
 [data-testid="stTextInput"] input,[data-testid="stTextArea"] textarea { font-size:14px; line-height:1.7; }
@@ -181,7 +169,6 @@ button p { line-height:1.5!important; }
   .task-stage { padding:8px 6px; }
   [data-testid="stTable"] th,[data-testid="stTable"] td { padding:9px; }
 }
-@media(prefers-reduced-motion:reduce) { .st-key-workspace_page label { transition:none; } }
 
 /* Shared workbench polish: readable content, quiet surfaces, clear actions. */
 [data-testid="stMain"] [data-testid="stHeadingWithActionElements"] { scroll-margin-top:80px; }
@@ -218,4 +205,26 @@ button p { line-height:1.5!important; }
  [data-testid="stTabs"] :is([data-baseweb="tab"],[role="tab"]) { padding:8px 12px; }
 }
 @media(prefers-reduced-motion:reduce) { .design-steps a { transition:none; } }
+/* Platform top bar (proposal sketches): brand, six workbenches, system menu. */
+.stMainBlockContainer { padding-top:4.4rem; }
+.st-key-top-bar { position:sticky; top:3.9rem; z-index:90; background:#fffffff2; border:1px solid var(--line); border-radius:14px; padding:8px 16px; margin-bottom:6px; box-shadow:0 3px 14px #274e3a08; }
+.top-brand { display:flex; align-items:center; min-height:40px; line-height:1.2; margin:0; font-size:19px; font-weight:700; letter-spacing:-.4px; color:var(--ink); white-space:nowrap; }
+/* Streamlit gives markdown blocks a negative bottom margin, which pushes centered text low in the bar. */
+.st-key-top-bar :is([data-testid="stMarkdown"],[data-testid="stMarkdownContainer"]) { margin:0!important; }
+.st-key-top-nav [data-testid="stButtonGroup"] { flex-wrap:wrap; }
+.st-key-top-nav button { border:0!important; background:transparent; min-height:38px; }
+.st-key-top-nav button[aria-checked="true"],.st-key-top-nav button[kind="segmented_controlActive"] { background:#e6f2ed!important; color:#14695d; box-shadow:inset 0 -2px 0 var(--teal); }
+.panel-title { font-size:16px; font-weight:650; color:var(--ink); padding-bottom:8px; margin-bottom:6px; border-bottom:1px solid var(--line); }
+:is(.st-key-predict-board,.st-key-predict-capacity,.st-key-predict-candidates,.st-key-custom-templates,.st-key-custom-chat,
+    .st-key-custom-preview,.st-key-custom-directions,.st-key-custom-designer) { background:var(--surface); }
+.st-key-predict-actions { background:#f3f7f2; position:sticky; bottom:8px; z-index:20; }
+[class*="st-key-candidate-"] { background:#fbfcf9; }
+[class*="st-key-home-entry-"] { min-height:190px; }
+[class*="st-key-custom-template-"] { text-align:center; }
+@media(max-width:900px) {
+  .st-key-top-bar { position:static; }
+  .st-key-top-bar [data-testid="stHorizontalBlock"] { flex-wrap:wrap; }
+  .st-key-top-bar [data-testid="stHorizontalBlock"] > [data-testid="stColumn"] { flex:1 1 100%; width:100%; }
+  .st-key-predict-actions { position:static; }
+}
 </style>

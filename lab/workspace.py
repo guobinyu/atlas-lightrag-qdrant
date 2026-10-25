@@ -59,6 +59,8 @@ class Workspace:
         self.semantic.auto_publish()
         from lab.culture.service import CultureService
         self.culture = CultureService(self.directory / "culture")
+        from lab.enterprises import Enterprises
+        self.enterprises = Enterprises(self.directory / "enterprises.json")
         from lab.campaigns import CampaignService
         self.campaigns = CampaignService(self)
         self.campaigns.interrupt()
@@ -201,7 +203,7 @@ class Workspace:
                 prior = self.demands.load(inputs.get('run_id'))['operations'].get(inputs.get('operation_id'), {})
                 effective = prior.get('kind')
                 cached_prompts = bool({'image_prompts', 'pattern_prompts'} & set(prior.get('cache', {})))
-            if effective != 'demand_image_revise' and not (effective == 'demand_image_generate' and cached_prompts):
+            if effective != 'demand_image_revise' and not (effective in ('demand_image_generate', 'demand_pipeline') and cached_prompts):
                 self.llm.settings.validate()
             run, operation = self.demands.prepare(kind, inputs)
             job = Job(self.job_dir, kind, [])
