@@ -13,9 +13,76 @@ from lab.llm import ExtractionLLM
 from lab.demands import export_markdown, export_bundle
 
 
+def stage(work, directory, report, entry, run_id, kind, **extra):
+    begun = time.monotonic()
+    future, _ = work.start('demand_' + kind, {'run_id': run_id, **extra})
+    result = future.result(timeout=1200)
+    record = {'kind': kind, 'status': result['status'], 'seconds': round(time.monotonic() - begun, 2),
+              'message': result.get('message'), 'model_calls': [e['data'] for e in result['events'] if e['event_type'] == 'llm.completed']}
+    entry['stages'].append(record)
+    (directory / 'report.json').write_text(json.dumps(report, ensure_ascii=False, indent=2), encoding='utf-8')
+    print(json.dumps({'case': entry['case'], **record}, ensure_ascii=False), flush=True)
+    return result['status'] == 'success'
+
+
+def verify_v4(work, directory, report):
+    """Feature 1: top-ranked calendar node with hard capacity checks. Feature 2: wedding template with three text variants."""
+    from lab.demand_design import export_markdown as design_markdown
+    from lab.demand_presets import TEMPLATES
+    from lab.demands import candidate_comparison
+    capacity = {'categories': ['丝巾', '家居服', '礼盒包装'], 'crafts': ['数码印花', '提花织造'], 'lead_days': 25, 'monthly': 2000, 'moq': 100}
+    base = {'industry': '丝绸', 'capabilities': '可生产真丝丝巾、家居服和礼盒包装，支持数码印花和提花织造', 'brand': '',
+            'constraints': '不生产酒类和食品', 'days': 7, 'capacity': capacity}
+    wedding = TEMPLATES['wedding']
+    cases = [('hotspot-calendar', {**base, 'request': '结合未来的节日或消费节点，预测适合批量上市的丝绸产品方向。', 'path': 'trend',
+                                   'audience': '', 'scene': '', 'purpose': '', 'theme': ''}, 1),
+             ('wedding-template', {**base, 'request': '为婚礼回礼设计真丝丝巾礼盒，希望有吉祥寓意但不过分传统。', 'path': 'custom', 'template': 'wedding',
+                                   'budget': {'price_min': 80, 'price_max': 200, 'quantity': 300},
+                                   **{k: wedding[k] for k in ('audience', 'scene', 'purpose', 'theme')}}, 3)]
+    for name, inputs, variants in cases:
+        run = work.demands.create(inputs)
+        entry = {'case': name, 'task_id': run['id'], 'stages': [], 'status': 'running'}
+        report['cases'].append(entry)
+        work.demands.approve(run['id'])
+        if name == 'hotspot-calendar':
+            # Explicit acceptance choice: the top-ranked calendar node whose date still fits the lead time.
+            topics = work.demands.topics(work.demands.load(run['id']))
+            topic = next((t for t in topics if t['kind'] == 'calendar' and t['score']['score'] is not None and not t['score']['flags']), None)
+            if not topic:
+                entry.update(status='failed', message='未来 120 天内没有满足交期的日历节点')
+                continue
+            work.demands.select_topic(run['id'], topic['id'])
+            entry['selected_topic'] = {'title': topic['title'], 'date': topic['date'], 'score': topic['score']}
+        if not stage(work, directory, report, entry, run['id'], 'candidates'):
+            entry['status'] = 'failed'
+            continue
+        batch = work.demands.load(run['id'])['candidate_rounds'][-1]
+        entry.update(capacity_log=batch['capacity_log'], comparison=candidate_comparison(batch),
+                     requirements=[c['requirements'] for c in batch['candidates']])
+        work.demands.select_candidate(run['id'], batch['id'], 'C1')
+        if not stage(work, directory, report, entry, run['id'], 'brief'):
+            entry['status'] = 'failed'
+            continue
+        current = work.demands.load(run['id'])
+        brief = current['briefs'][-1]
+        entry['package'] = brief['content']['package']
+        (directory / (name + '-brief.md')).write_text(export_markdown(current, brief), encoding='utf-8')
+        if not stage(work, directory, report, entry, run['id'], 'design_generate', brief_id=brief['id'], variants=variants):
+            entry['status'] = 'failed'
+            continue
+        current = work.demands.load(run['id'])
+        designs = current['design_versions'][-variants:]
+        entry['designs'] = [{'title': d['content']['title'], 'concept': d['content']['concept'],
+                             'palette': d['content']['palette'], 'group_id': d.get('group_id')} for d in designs]
+        for d in designs:
+            (directory / f"{name}-design-v{d['version']}.md").write_text(design_markdown(current, d), encoding='utf-8')
+        entry.update(status='success', merchant_unchanged=current['inputs']['capacity'] == capacity and current['inputs']['brand'] == '',
+                     visual_review='pending')
+
+
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument('--case', choices=['custom', 'trend', 'silk-custom', 'both'], default='both')
+    parser.add_argument('--case', choices=['custom', 'trend', 'silk-custom', 'silk-v4', 'both'], default='both')
     mode = parser.add_mutually_exclusive_group()
     mode.add_argument('--intake', action='store_true', help='仅验收黄酒和丝绸定制的需求分析、确认及候选衔接')
     mode.add_argument('--design', action='store_true', help='验收黄酒和丝绸定制的完整设计交接、修订及导出')
@@ -35,6 +102,9 @@ def main():
         work = engine.workbench
         work.llm.settings = model.settings
         cases = (['custom', 'silk-custom'] if args.intake or args.design else ['custom', 'trend']) if args.case == 'both' else [args.case]
+        if args.case == 'silk-v4':
+            verify_v4(work, directory, report)
+            cases = []
         for case in cases:
             inputs = {'request': '为校友聚会提出黄酒纪念礼品建议，主题为重逢，可用桂花作视觉意象，但尚未决定改变酒的风味；预算和数量尚未确定。', 'industry': '黄酒',
                       'capabilities': '能生产黄酒、定制标签和礼盒包装', 'brand': '', 'constraints': '不生产服饰，不宣称保健功效',

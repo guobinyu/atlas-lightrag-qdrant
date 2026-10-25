@@ -19,6 +19,7 @@ palette.role 只能为 main、secondary 或 accent，不允许 support 等其他
 沿用来源文化故事并细化视觉，不另起无关主线。facts 中外部事实只能引用 evidence 的实际 ref 及连续原文；没有来源时 facts=[]，故事标为创意。后续事项聚焦当前设计，说明责任、时点和推进方式，不凑问题，也不将历史已解决问题照抄成待办。
 有 base 时按 instruction 修订完整方案，未要求变化的概念、故事和交付保留；涉及配色或构图的修改要同步到各应用。若修改意见冲突硬性条件，保留条件并在 followups 说明先修改上游需求。不能把“仅输出文字”的系统边界写成下游不能制作设计稿。
 assumptions 是字符串数组；其余对象列表严格遵循字段结构，不输出图片或不存在的文件链接。
+distinct_from 存在时，其中是同一需求单已生成的其他版本：本版需在概念、构图或配色上有明显区别，同时满足同样的条件和全部核心交付，不只换标题。source_brief 有 package 时延续其中的定位、纹样方向、IP 与规格建议。
 evidence 中 M 开头的是文化知识库素材（card 为摘要，text 为原文引文，colors 为素材配色）。采用某素材时在对应 story_mapping 项或 palette 项加 "element_ref":"M1"；palette 项引用配色素材时 hex 必须取自该素材 colors。interpretation 素材只作创意依据，不写进 facts。未采用素材时不填该字段，不编造素材编号。
 '''
 
@@ -28,12 +29,15 @@ def deliverables(brief):
             for i, item in enumerate(brief['content'].get('deliverables', []), 1)]
 
 
-def model_input(brief, base, instruction):
-    return {'source_brief': deepcopy(brief['content']), 'source_brief_format': brief.get('format_version', 1),
-            'confirmed_conditions': deepcopy(brief['summary']), 'source_candidate': deepcopy(brief['candidate']),
-            'structured_deliverables': deliverables(brief), 'evidence': deepcopy(brief['evidence']),
-            'topic': deepcopy(brief.get('topic')), 'base': deepcopy(base['content']) if base else None,
-            'instruction': instruction}
+def model_input(brief, base, instruction, distinct_from=()):
+    value = {'source_brief': deepcopy(brief['content']), 'source_brief_format': brief.get('format_version', 1),
+             'confirmed_conditions': deepcopy(brief['summary']), 'source_candidate': deepcopy(brief['candidate']),
+             'structured_deliverables': deliverables(brief), 'evidence': deepcopy(brief['evidence']),
+             'topic': deepcopy(brief.get('topic')), 'base': deepcopy(base['content']) if base else None,
+             'instruction': instruction}
+    if distinct_from:
+        value['distinct_from'] = deepcopy(list(distinct_from))
+    return value
 
 
 def validate(value, brief):
@@ -93,10 +97,11 @@ def validate(value, brief):
 
 
 def sections(run, design):
-    from lab.demands import mapping_markdown, FIELDS
+    from lab.demands import mapping_markdown, FIELDS, structured_lines, package_markdown, topic_note
     v = design['content']
     brief = design['brief_snapshot']
-    meta = (f"文字设计方案 · 任务：{run['id']} · 设计版本：{design['version']}\n\n"
+    meta = (f"文字设计方案 · 任务：{run['id']} · 设计版本：{design['version']}"
+            + (f" · 同组方案 {design['variant']}/{design['variants']}" if design.get('group_id') else '') + "\n\n"
             f"来源需求单：{brief['content']['title']} · 版本 {brief['version']} · ID：{brief['id']}\n\n"
             f"需求版本：{design['binding']['revision']} · 候选轮次：{design['selection']['round_id']} · 候选：{design['selection']['candidate_id']}")
     result = [(v['title'], meta, False), ('整体概念', '\n\n'.join([v['concept'], v['audience_scene'], v['story']]), False)]
@@ -119,15 +124,18 @@ def sections(run, design):
     result.append(('产品应用与交付', '\n\n'.join(applied), False))
     inputs = brief['summary']['inputs']
     notes = [f"- {label}：{inputs.get(k) or '未提供'}" for k, label in FIELDS.items()]
+    notes += ['- ' + line for line in structured_lines(inputs)]
     notes += [f"- 补充回答 · {q}：{a}" for q, a in brief['summary']['answers'].items()]
     notes += ['- ' + a for a in v['assumptions']]
     result.append(('已确认条件与设计假设', '\n'.join(notes), True))
+    if brief['content'].get('package'):
+        result.append(('来源方案包与需求规格书', package_markdown(brief['content']['package']), True))
     pending = [f"- **{a['item']}**（{a['category']}）\n\n  建议责任：{a['owner']}；时点：{a['timing']}\n\n  推进方式：{a['approach']}" for a in v['followups']]
     result.append(('后续确认', '\n\n'.join(pending) or '暂无额外事项。', True))
     refs = []
     if brief.get('topic'):
         t = brief['topic']
-        refs += [t['title'], '时间已核验，热度未验证。' if t['date_status'] == 'verified' else '非已核实近期话题，仅作文化参考；热度未验证。']
+        refs += [t['title'], topic_note(t)]
     for fact in v['facts']:
         refs.append('- ' + fact['text'])
         refs += ['  - [' + c['ref'] + '] ' + c['quote'] for c in fact['citations']]

@@ -200,7 +200,7 @@ class Workspace:
             if kind == 'demand_retry':
                 prior = self.demands.load(inputs.get('run_id'))['operations'].get(inputs.get('operation_id'), {})
                 effective = prior.get('kind')
-                cached_prompts = 'image_prompts' in prior.get('cache', {})
+                cached_prompts = bool({'image_prompts', 'pattern_prompts'} & set(prior.get('cache', {})))
             if effective != 'demand_image_revise' and not (effective == 'demand_image_generate' and cached_prompts):
                 self.llm.settings.validate()
             run, operation = self.demands.prepare(kind, inputs)

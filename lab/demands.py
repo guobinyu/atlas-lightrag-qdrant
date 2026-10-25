@@ -8,13 +8,18 @@ import re
 import threading
 import uuid
 
+from datetime import date, datetime
+from urllib.parse import urlsplit
+
+from lab import demand_scoring
+from lab.demand_presets import STYLES, TEMPLATES
 from lab.sources import search_web, fetch_source, utc_now
-from lab.trends import verify_date, topic_dates
+from lab.trends import BEIJING, verify_date, topic_dates
 
 FIELDS = {'request': '原始需求', 'industry': '行业', 'capabilities': '生产能力', 'brand': '品牌名称',
           'constraints': '已知限制', 'audience': '目标人群', 'scene': '使用场景', 'purpose': '核心用途', 'theme': '文化主题'}
 MAX_CLARIFICATION_ROUNDS = 5
-CONTENT_FORMAT_VERSION = 3
+CONTENT_FORMAT_VERSION = 4
 ANALYSIS_FORMAT_VERSION = 2
 EXPLORATION_FIELDS = ('audience', 'scene', 'purpose', 'theme')
 ANALYSIS_V2 = '''DEMAND_ANALYZE：理解定制需求，返回 {"known":["对用户已提供信息的理解"],"unknown":["仍待探索的条件"],"questions":[{"text":"影响方向的关键问题","options":["可选回答"]}],"suggestions":{"audience":"从用户原话整理的人群","scene":"从原话整理的情境","purpose":"从原话整理的用途","theme":"从原话整理的主题"},"recommendations":{"purpose":{"value":"针对未知条件建议的用途","reason":"为何适合当前能力和场景"}}}。
@@ -64,6 +69,16 @@ decision_context 分开提供用户确认条件、选定方向、方案规格与
 assumptions 必须是字符串数组，每项将假设及验证方式合写为一段文本，禁止使用对象；story_mapping、deliverables、followups 才是对象数组。
 ''' + CULTURE_RULES
 
+CANDIDATE_V4 = CANDIDATE_V3 + '''每个候选另需提供 "requirements":{"category":"产品品类","crafts":["所需工艺"],"lead_days":可用生产周期天数或null,"quantity":建议首批数量或null} 和 "potential":{"score":1到5的整数,"reason":"爆款潜力判断及依据"}。
+summary.inputs.capacity 是商家产能：categories 为可生产品类，crafts 为可用工艺，lead_days 为常规交期天数，monthly 为月产能，moq 为起订量。已提供 categories 时 category 必须从中选择；所需工艺不在 crafts 中时必须同时写入 capability_gaps；quantity 不能超过 monthly 在可用周期内的产量，也不能低于 moq；可用周期不能短于常规交期。summary.inputs.budget 中 price_min、price_max 为预算单价（元），quantity 为数量。
+topic.kind 为 calendar 时是未来的节日或消费节点，用来安排上市时间；为 manual 时是用户手动提供的热点；两者都未验证热度。topic_score 是程序按用户权重计算的预测评分，不是真实热度。potential 是你的判断，不得写成销量预测或爆款承诺。
+template_focus 存在时按其中的场景关注点设计候选，并在 assumptions 说明仍需商家确认的部分。round_to_fix、candidates_to_fix 和 capacity_violations 存在时，round_to_fix 是上一版完整候选，其中部分方向违反产能约束：修正或替换这些方向，其余方向尽量保留，数量不变。
+'''
+BRIEF_V4 = BRIEF_V3 + '''另需提供产品方案包 "package"：{"positioning":"产品定位","audience":"目标人群","story":"文化故事摘要","materials":"面料与工艺建议","patterns":[{"direction":"纹样方向","element_ref":"可选，M 开头素材"}],"ip":[{"name":"IP 名称","usage":"使用方式","rights":"授权情况或待确认事项","element_ref":"可选"}],"pricing":{"low":数字,"high":数字,"basis":"定价依据"},"risks":[{"item":"风险","level":"高、中或低","response":"应对措施"}],"specs":[{"item":"规格项目","value":"建议值","status":"确认、建议或待定"}]}。
+pricing 是参考单价（元），需要报价验证；用户提供 budget 单价时，区间必须与预算单价区间有重叠。specs 只有用户明确确认的条件可标为确认，其余标为建议或待定。risks 至少一项，选市场、生产、授权、交期中真正相关的风险。没有可用 IP 或授权不明时 ip 可为空数组，不得编造授权。patterns 至少一项。
+'''
+TEMPLATE_RULE = 'template_focus 是用户选择的场景模板关注点，只用于判断需要澄清什么和给出建议，不是用户已确认的条件。'
+
 MERCHANT_FIELDS = ('industry', 'capabilities', 'brand', 'constraints')
 BRIEF_FIELDS = {'overview': '项目与产品概述', 'audience_scene': '目标人群、场景与需求',
                 'product_goals': '产品形态与设计目标', 'story': '文化主题与 IP 故事（策划建议）',
@@ -95,7 +110,67 @@ def clean_inputs(value):
     if value.get('path') not in ('trend', 'custom') or value.get('days', 7) not in (1, 7, 30):
         raise ValueError('请选择有效探索路径和时间范围。')
     result.update(path=value['path'], days=value.get('days', 7))
+    result.update(clean_structured(value))
     return result
+
+
+CAPACITY_LISTS = ('categories', 'crafts')
+CAPACITY_NUMBERS = {'lead_days': 365, 'monthly': 10_000_000, 'moq': 10_000_000}
+BUDGET_NUMBERS = {'price_min': 1_000_000, 'price_max': 1_000_000, 'quantity': 10_000_000}
+
+
+def clean_structured(value):
+    """Optional merchant capacity, budget and template. Empty values are omitted so old tasks compare equal."""
+    capacity, budget = value.get('capacity') or {}, value.get('budget') or {}
+    if not isinstance(capacity, dict) or set(capacity) - {*CAPACITY_LISTS, *CAPACITY_NUMBERS}:
+        raise ValueError('产能参数格式无效。')
+    if not isinstance(budget, dict) or set(budget) - set(BUDGET_NUMBERS):
+        raise ValueError('预算格式无效。')
+    cap, bud = {}, {}
+    for key in CAPACITY_LISTS:
+        items = capacity.get(key) or []
+        if not isinstance(items, list) or len(items) > 30 or any(not isinstance(x, str) or not 1 <= len(x.strip()) <= 30 for x in items):
+            raise ValueError('可生产品类和工艺最多 30 项，每项 1–30 字。')
+        if items:
+            cap[key] = list(dict.fromkeys(x.strip() for x in items))
+    for key, high in CAPACITY_NUMBERS.items():
+        v = capacity.get(key)
+        if v in (None, 0):
+            continue
+        if type(v) is not int or not 1 <= v <= high:
+            raise ValueError('交期、月产能和起订量需为正整数。')
+        cap[key] = v
+    for key, high in BUDGET_NUMBERS.items():
+        v = budget.get(key)
+        if v in (None, 0):
+            continue
+        if isinstance(v, bool) or not isinstance(v, (int, float)) or not 0 < v <= high or (key == 'quantity' and type(v) is not int):
+            raise ValueError('预算单价和数量需为正数。')
+        bud[key] = v
+    if 'price_min' in bud and 'price_max' in bud and bud['price_min'] > bud['price_max']:
+        raise ValueError('预算单价下限不能高于上限。')
+    template = value.get('template') or ''
+    if template not in ('', *TEMPLATES):
+        raise ValueError('场景模板无效。')
+    return {k: v for k, v in (('capacity', cap), ('budget', bud), ('template', template)) if v}
+
+
+def structured_lines(inputs):
+    cap, bud, lines = inputs.get('capacity') or {}, inputs.get('budget') or {}, []
+    if inputs.get('template'):
+        lines.append('场景模板：' + TEMPLATES[inputs['template']]['label'])
+    if cap.get('categories'):
+        lines.append('可生产品类：' + '、'.join(cap['categories']))
+    if cap.get('crafts'):
+        lines.append('可用工艺：' + '、'.join(cap['crafts']))
+    for key, label in (('lead_days', '常规交期（天）'), ('monthly', '月产能（件）'), ('moq', '起订量（件）')):
+        if cap.get(key):
+            lines.append(f'{label}：{cap[key]}')
+    if bud.get('price_min') or bud.get('price_max'):
+        lines.append(f"预算单价（元）：{bud.get('price_min', '未定')}–{bud.get('price_max', '未定')}")
+    if bud.get('quantity'):
+        lines.append(f"预算数量（件）：{bud['quantity']}")
+    return lines
 
 
 def strings(value, name, limit=None):
@@ -234,6 +309,8 @@ def check_facts(value, evidence):
                 raise ValueError('事实引用未知来源或引文无法定位。')
             if source.get('basis') == 'interpretation':
                 raise ValueError('设计解读类文化素材不能作为事实依据。')
+            if source.get('basis') in ('user', 'calendar'):
+                raise ValueError('手动热点和日历节点不能作为事实依据。')
 
 
 def check_element_refs(items, evidence):
@@ -244,6 +321,142 @@ def check_element_refs(items, evidence):
             continue
         if not isinstance(ref, str) or 'element_id' not in evidence.get(ref, {}):
             raise ValueError('element_ref 必须引用本次资料中的文化素材（M 开头）。')
+
+
+def check_requirements(item):
+    req = item.get('requirements')
+    if not isinstance(req, dict) or not isinstance(req.get('category'), str) or not req['category'].strip():
+        raise ValueError('候选需提供产品品类。')
+    strings(req.get('crafts'), '所需工艺')
+    for key in ('lead_days', 'quantity'):
+        v = req.get(key)
+        if v is not None and (type(v) is not int or v <= 0):
+            raise ValueError('生产周期和建议数量需为正整数或 null。')
+    potential = item.get('potential')
+    texts(potential, ('reason',))
+    if type(potential.get('score')) is not int or not 1 <= potential['score'] <= 5:
+        raise ValueError('爆款潜力评分需为 1–5 的整数。')
+
+
+def capacity_violations(candidate, capacity):
+    """Hard limits from merchant capacity; no capacity parameters means no filtering."""
+    req, gaps, problems = candidate.get('requirements') or {}, candidate.get('capability_gaps', []), []
+    if capacity.get('categories') and req.get('category') not in capacity['categories']:
+        problems.append(f"品类「{req.get('category')}」不在可生产品类中")
+    if capacity.get('crafts'):
+        for craft in req.get('crafts', []):
+            if craft not in capacity['crafts'] and not any(craft in gap for gap in gaps):
+                problems.append(f'工艺「{craft}」不在可用工艺中，且未列入需新增能力')
+    if req.get('lead_days') and capacity.get('lead_days') and req['lead_days'] < capacity['lead_days']:
+        problems.append(f"可用生产周期 {req['lead_days']} 天短于常规交期 {capacity['lead_days']} 天")
+    lead, quantity = req.get('lead_days') or capacity.get('lead_days'), req.get('quantity')
+    if quantity and capacity.get('monthly') and lead and quantity > capacity['monthly'] * lead / 30:
+        problems.append(f"建议数量 {quantity} 件超过可用周期内产能约 {int(capacity['monthly'] * lead / 30)} 件")
+    if quantity and capacity.get('moq') and quantity < capacity['moq']:
+        problems.append(f"建议数量 {quantity} 件低于起订量 {capacity['moq']} 件")
+    return problems
+
+
+def capacity_status(candidate, capacity):
+    if not capacity:
+        return '未设置产能参数'
+    crafts = capacity.get('crafts')
+    extra = [c for c in candidate['requirements']['crafts'] if crafts and c not in crafts]
+    return '通过' + ('；需新增能力：' + '、'.join(extra) if extra else '')
+
+
+RISK_LEVELS = ('高', '中', '低')
+SPEC_STATUS = ('确认', '建议', '待定')
+
+
+def check_package(value, inputs, evidence):
+    package = value.get('package')
+    texts(package, ('positioning', 'audience', 'story', 'materials'))
+    patterns, ip, risks, specs = (package.get(k) for k in ('patterns', 'ip', 'risks', 'specs'))
+    if not isinstance(patterns, list) or not patterns or not isinstance(ip, list) or not isinstance(specs, list):
+        raise ValueError('方案包需要纹样方向、IP 信息和规格表数组，纹样方向至少一项。')
+    for item in patterns:
+        texts(item, ('direction',))
+    for item in ip:
+        texts(item, ('name', 'usage', 'rights'))
+    check_element_refs(patterns + ip, evidence)
+    if not isinstance(risks, list) or not risks:
+        raise ValueError('风险评估至少需要一项。')
+    for item in risks:
+        texts(item, ('item', 'level', 'response'))
+        if item['level'] not in RISK_LEVELS:
+            raise ValueError('风险等级只能为高、中或低。')
+    for item in specs:
+        texts(item, ('item', 'value', 'status'))
+        if item['status'] not in SPEC_STATUS:
+            raise ValueError('规格状态只能为确认、建议或待定。')
+    pricing = package.get('pricing')
+    texts(pricing, ('basis',))
+    low, high = pricing.get('low'), pricing.get('high')
+    if any(isinstance(x, bool) or not isinstance(x, (int, float)) or x <= 0 for x in (low, high)) or low > high:
+        raise ValueError('定价参考需为正数区间。')
+    budget = inputs.get('budget') or {}
+    if budget.get('price_min') or budget.get('price_max'):
+        floor, ceiling = budget.get('price_min', 0), budget.get('price_max', float('inf'))
+        if low > ceiling or high < floor:
+            raise ValueError('定价参考与预算单价区间没有重叠。')
+
+
+def used_refs(value):
+    package = value.get('package') or {}
+    items = [*value.get('story_mapping', []), *value.get('palette', []), *package.get('patterns', []), *package.get('ip', [])]
+    return {i['element_ref'] for i in items if isinstance(i, dict) and i.get('element_ref')}
+
+
+def element_changes(raw, evidence):
+    """Structured add/remove of culture elements plus a style preset; returns (changes, instruction text)."""
+    if not raw:
+        return None, ''
+    if not isinstance(raw, dict) or set(raw) - {'adopt', 'remove', 'style'}:
+        raise ValueError('文化元素调整格式无效。')
+    adopt, remove, style = raw.get('adopt') or [], raw.get('remove') or [], raw.get('style') or ''
+    for refs in (adopt, remove):
+        if not isinstance(refs, list) or any(not isinstance(r, str) or 'element_id' not in evidence.get(r, {}) for r in refs):
+            raise ValueError('只能调整本次资料中的文化素材。')
+    if set(adopt) & set(remove) or style not in ('', *STYLES):
+        raise ValueError('同一素材不能同时采用和移除，风格需从预设中选择。')
+    if not (adopt or remove or style):
+        return None, ''
+    parts = []
+    if adopt:
+        parts.append('采用文化素材：' + '、'.join(f"{r} {evidence[r]['label']}" for r in adopt) + '，并在 element_ref 中标明')
+    if remove:
+        parts.append('移除文化素材：' + '、'.join(f"{r} {evidence[r]['label']}" for r in remove) + '，不再使用其元素和编号')
+    if style:
+        parts.append('整体风格调整为' + style)
+    return {'adopt': list(adopt), 'remove': list(remove), 'style': style}, '；'.join(parts) + '。'
+
+
+def check_element_changes(value, changes):
+    refs = used_refs(value)
+    missing = [r for r in changes['adopt'] if r not in refs]
+    kept = [r for r in changes['remove'] if r in refs]
+    if missing or kept:
+        raise ValueError('文化元素调整未生效：' + '；'.join(
+            [*(f'{r} 需在 element_ref 中采用' for r in missing), *(f'{r} 应已移除' for r in kept)]))
+
+
+def package_markdown(package):
+    def ref(item):
+        return f"（文化素材 {item['element_ref']}）" if item.get('element_ref') else ''
+    def cell(text):
+        return str(text).replace('|', '｜').replace('\n', ' ')
+    pricing = package['pricing']
+    blocks = [f"**定位**：{package['positioning']}", f"**目标人群**：{package['audience']}",
+              f"**文化故事**：{package['story']}", f"**面料与工艺**：{package['materials']}",
+              '**纹样方向**\n\n' + '\n'.join('- ' + p['direction'] + ref(p) for p in package['patterns']),
+              '**IP 信息**\n\n' + ('\n'.join(f"- {i['name']}：{i['usage']}；授权：{i['rights']}{ref(i)}" for i in package['ip']) or '- 暂无可用 IP'),
+              f"**定价参考**：{pricing['low']}–{pricing['high']} 元／件。{pricing['basis']}（参考估算，需报价验证）",
+              '**风险评估**\n\n' + '\n'.join(f"- [{r['level']}] {r['item']}：{r['response']}" for r in package['risks'])]
+    if package['specs']:
+        blocks.append('**需求规格书**\n\n| 项目 | 建议值 | 状态 |\n|---|---|---|\n' + '\n'.join(
+            f"| {cell(x['item'])} | {cell(x['value'])} | {x['status']} |" for x in package['specs']))
+    return '\n\n'.join(blocks)
 
 
 def clarification_rounds(run):
@@ -265,12 +478,44 @@ def stale(run, result):
     return result['binding'] != binding(run)
 
 
+def current_day():
+    return datetime.fromisoformat(utc_now()).astimezone(BEIJING).date()
+
+
+def topic_note(topic):
+    kind = topic.get('kind', 'search')
+    if kind == 'calendar':
+        return f"日历节点（{topic['date']}），用于安排上市时间；热度未验证。"
+    if kind == 'manual':
+        return '用户手动添加的热点；热度未验证。'
+    return '时间已核验，热度未验证。' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作文化参考；热度未验证。'
+
+
+def find_topic(run, topic_id):
+    if not topic_id:
+        return None
+    if topic_id.startswith('U'):
+        return next((t for t in run.get('manual_topics', []) if t['id'] == topic_id), None)
+    if topic_id.startswith('N-'):
+        return next((t for t in run.get('calendar_topics', []) if t['id'] == topic_id), None)
+    research = next((r for r in run['research'] if r['id'] == run['research_id']), None)
+    return next((t for t in research['topics'] if t['id'] == topic_id), None) if research else None
+
+
+def topic_evidence(topic):
+    """User and calendar topics are planning inputs, never citable facts."""
+    text = topic['title'] + '。' + topic.get('fit', '')
+    return {'title': ('手动热点：' if topic['kind'] == 'manual' else '日历节点：') + topic['title'], 'text': text,
+            'url': topic.get('url', ''), 'basis': 'user' if topic['kind'] == 'manual' else 'calendar'}
+
+
 class DemandService:
     def __init__(self, workspace):
         self.work = workspace
         self.directory = workspace.directory / 'demands'
         self.directory.mkdir(parents=True, exist_ok=True)
         self.lock = threading.RLock()
+        self.calendar = demand_scoring.Calendar(workspace.directory / 'demand-calendar.json')
 
     def _path(self, identifier):
         if not isinstance(identifier, str) or not re.fullmatch(r'[a-f0-9]{32}', identifier):
@@ -319,7 +564,8 @@ class DemandService:
             return run
 
     def merchant(self, identifier):
-        return {k: self.load(identifier)['inputs'][k] for k in MERCHANT_FIELDS}
+        inputs = self.load(identifier)['inputs']
+        return {**{k: inputs[k] for k in MERCHANT_FIELDS}, 'capacity': deepcopy(inputs.get('capacity', {}))}
 
     def update(self, identifier, inputs, answers=None):
         inputs = clean_inputs(inputs)
@@ -453,12 +699,66 @@ class DemandService:
 
     def select_topic(self, identifier, topic_id):
         with self.edit(identifier) as run:
-            research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
-            if not research or topic_id not in {t['id'] for t in research.get('topics', [])}:
-                raise ValueError('请选择当前资料版本中的话题。')
+            if not isinstance(topic_id, str):
+                raise ValueError('请选择有效话题。')
+            if topic_id.startswith('N-'):
+                node = next((n for n in self.calendar.upcoming(current_day()) if 'N-' + n['key'] == topic_id), None)
+                if not node:
+                    raise ValueError('请选择未来 120 天内的日历节点。')
+                # Snapshot once: later calendar edits never change a selected topic.
+                if not any(t['id'] == topic_id for t in run.setdefault('calendar_topics', [])):
+                    run['calendar_topics'].append(demand_scoring.calendar_topic(node))
+            elif topic_id.startswith('U'):
+                if not find_topic(run, topic_id):
+                    raise ValueError('手动热点不存在。')
+            else:
+                research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
+                if not research or topic_id not in {t['id'] for t in research.get('topics', [])}:
+                    raise ValueError('请选择当前资料版本中的话题。')
             if topic_id != run['topic_id']:
                 run.update(topic_id=topic_id, selection=None)
-                self.save(run)
+            self.save(run)
+
+    def add_manual_topic(self, identifier, title, note='', url='', day=None):
+        title, note, url = (x.strip() if isinstance(x, str) else '' for x in (title, note, url))
+        if not 2 <= len(title) <= 60 or len(note) > 500:
+            raise ValueError('热点标题需为 2–60 字，说明不超过 500 字。')
+        if url and (urlsplit(url).scheme not in ('http', 'https') or not urlsplit(url).hostname or len(url) > 1000):
+            raise ValueError('参考链接需为 http(s) 地址；链接只作记录，不会被读取。')
+        if day:
+            try:
+                day = date.fromisoformat(str(day)).isoformat()
+            except ValueError:
+                raise ValueError('请填写有效日期。') from None
+        with self.edit(identifier) as run:
+            topics = run.setdefault('manual_topics', [])
+            topic = {'id': 'U' + str(len(topics) + 1), 'kind': 'manual', 'title': title, 'fit': note or '用户手动添加',
+                     'url': url, 'date': day or '', 'date_status': 'manual', 'heat': '热度未验证', 'at': utc_now()}
+            topics.append(topic)
+            self.save(run)
+            return topic
+
+    def set_scoring(self, identifier, weights, heat):
+        """Ranking preferences only: no model call, no new revision, no change to bindings."""
+        weights, heat = demand_scoring.check(weights, heat)
+        with self.edit(identifier) as run:
+            run['scoring'] = {'weights': weights, 'heat': heat}
+            self.save(run)
+
+    def topics(self, run):
+        today = current_day()
+        research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
+        items = [{**t, 'kind': t.get('kind', 'search')} for t in research['topics']] if research else []
+        items += deepcopy(run.get('manual_topics', []))
+        snapshots = {t['id']: t for t in run.get('calendar_topics', [])}
+        upcoming = [demand_scoring.calendar_topic(n) for n in self.calendar.upcoming(today)]
+        items += [deepcopy(snapshots.get(t['id'], t)) for t in upcoming]
+        # A selected node stays listed from its snapshot even after the calendar changes.
+        if run['topic_id'] in snapshots and all(t['id'] != run['topic_id'] for t in upcoming):
+            items.append(deepcopy(snapshots[run['topic_id']]))
+        for t in items:
+            t['score'] = demand_scoring.score(t, run, today)
+        return sorted(items, key=lambda t: (t['score']['score'] is None, -(t['score']['score'] or 0)))
 
     def select_candidate(self, identifier, round_id, candidate_id):
         with self.edit(identifier) as run:
@@ -511,10 +811,19 @@ class DemandService:
         image_data = demand_images.prepare(self, run, kind, inputs, instruction) if kind in demand_images.KINDS else None
         base = None
         source_brief = None
+        changes = None
+        variants = inputs.get('variants', 1)
+        if variants not in (1, 3) or (variants == 3 and kind != 'demand_design_generate'):
+            raise ValueError('设计方案一次可生成 1 版或 3 版。')
+        if variants == 3 and inputs.get('include_images'):
+            raise ValueError('三版方案只生成文字，选定其中一版后再生成图稿。')
         if kind in DESIGN_KINDS:
             brief_id = inputs.get('brief_id')
             if kind == 'demand_design_revise':
                 base = next((v for v in run.get('design_versions', []) if v['id'] == inputs.get('design_id')), None)
+                if base:
+                    changes, extra = element_changes(inputs.get('element_changes'), base['brief_snapshot']['evidence'])
+                    instruction = '\n'.join(x for x in (instruction.strip(), extra) if x)
                 if not base or not instruction.strip():
                     raise ValueError('请选择设计方案并填写修改意见。')
                 brief_id = base['brief_id']
@@ -527,6 +836,9 @@ class DemandService:
                 source_brief = base['brief_snapshot']
         if kind == 'demand_revise':
             base = next((b for b in run['briefs'] if b['id'] == inputs.get('brief_id')), None)
+            if base:
+                changes, extra = element_changes(inputs.get('element_changes'), base['evidence'])
+                instruction = '\n'.join(x for x in (instruction.strip(), extra) if x)
             if not base or stale(run, base) or base['selection'] != run['selection'] or not instruction.strip():
                 raise ValueError('请选择当前候选的需求单，并填写修改意见。')
         if kind == 'demand_search':
@@ -554,13 +866,20 @@ class DemandService:
               'count': count, 'instruction': instruction, 'base': deepcopy(base), 'cache': {}, 'responses': []}
         if image_data is not None:
             op.update(image_data)
+        if changes:
+            op['element_changes'] = changes
+        if variants > 1:
+            op['variants'] = variants
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
         if source_brief is not None and inputs.get('include_images', False):
             if not self.work.images.configured:
                 raise ValueError('请先配置图片服务，再生成包含图稿的设计方案。')
             self.work.images.settings.validate()
+            if inputs.get('image_mode', 'application') not in ('application', 'pattern'):
+                raise ValueError('图稿类型只能为应用效果图或纹样初稿。')
             op['include_images'] = True
+            op['image_mode'] = inputs.get('image_mode', 'application')
             op['image_config'] = self.work.images.settings.public()
         if source_brief is not None:
             op.update(design_format_version=DESIGN_FORMAT_VERSION, brief_snapshot=deepcopy(source_brief),
@@ -661,13 +980,15 @@ class DemandService:
             assigned = set()
             for g in groups:
                 texts(g, ('title', 'fit'))
+                if 'fit_score' in g and (type(g['fit_score']) is not int or not 1 <= g['fit_score'] <= 5):
+                    raise ValueError('能力关联评分需为 1–5 的整数。')
                 strings(g.get('source_ids'), '来源标识')
                 ids = g['source_ids']
                 if not ids or len(set(ids)) != len(ids) or any(i not in research['extractions'] or i in assigned for i in ids):
                     raise ValueError('话题引用未知或重复来源。')
                 assigned.update(ids)
         grouped = await self.ask(run, op, 'groups',
-            'DEMAND_GROUP：聚合同一事件，返回 {"groups":[{"title":"话题","source_ids":["S1"],"fit":"与商家能力的关联理由（判断）"}]}。最多五个，优先时间已核验且与能力、人群、场景和用途相关，在 fit 中说明结合方式，不得引入输入外来源，每来源至多一组。',
+            'DEMAND_GROUP：聚合同一事件，返回 {"groups":[{"title":"话题","source_ids":["S1"],"fit":"与商家能力的关联理由（判断）","fit_score":1到5的整数}]}。fit_score 表示与商家能力、人群和场景的关联程度，是判断而不是热度。最多五个，优先时间已核验且与能力、人群、场景和用途相关，在 fit 中说明结合方式，不得引入输入外来源，每来源至多一组。',
             {'summary': op['input_snapshot'], 'events': research['extractions']}, check_groups)
         research['topics'] = [{**g, 'id': 'T' + str(i), **topic_dates(research['extractions'], g['source_ids']), 'heat': '热度未验证'} for i, g in enumerate(grouped['groups'], 1)]
         if not any(r['id'] == research['id'] for r in run['research']):
@@ -689,9 +1010,15 @@ class DemandService:
             op['binding'] = binding(run)
             self.save(run)
         if run['topic_id']:
-            research = next(r for r in run['research'] if r['id'] == run['research_id'])
-            topic = next(t for t in research['topics'] if t['id'] == run['topic_id'])
-            evidence = {s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']}
+            topic = deepcopy(find_topic(run, run['topic_id']))
+            if topic is None:
+                raise ValueError('所选话题不存在，请重新选择。')
+            topic.setdefault('kind', 'search')
+            if topic['kind'] == 'search':
+                research = next(r for r in run['research'] if r['id'] == run['research_id'])
+                evidence = {s['id']: s for s in research['sources'] if s['id'] in topic['source_ids']}
+            else:
+                evidence = {topic['id']: topic_evidence(topic)}
         self.checkpoint(run, op, job, '检索本地相关资料')
         query = ' '.join([op['input_snapshot']['inputs'].get(k, '') for k in ('purpose', 'audience', 'scene', 'theme', 'request', 'industry', 'capabilities')] + [topic['title'] if topic else ''])[:2000]
         chunks = await self.work.engine.campaign_context(query)
@@ -702,6 +1029,8 @@ class DemandService:
         evidence.update({'M' + str(i): e for i, e in enumerate(elements, 1)})
         value = {'summary': deepcopy(op['input_snapshot']), 'topic': deepcopy(topic), 'evidence': deepcopy(evidence),
                  'knowledge_missing': not chunks, 'culture_missing': not elements, 'instruction': op['instruction']}
+        if topic:
+            value['topic_score'] = demand_scoring.score(topic, run, current_day())
         op['cache']['context'] = value
         self.save(run)
         return value
@@ -718,8 +1047,11 @@ class DemandService:
             data = deepcopy(op['input_snapshot'])
             if analysis_version >= 2 and data['inputs']['path'] == 'custom':
                 data['inputs'].pop('days', None)
+            template = data['inputs'].get('template')
+            if template:
+                data['template_focus'] = TEMPLATES[template]['focus']
             value = await self.ask(run, op, 'analysis',
-                ANALYSIS_V2 + closing + PROACTIVE_RULES if analysis_version >= 2 else legacy_prompt,
+                (ANALYSIS_V2 + closing + PROACTIVE_RULES if analysis_version >= 2 else legacy_prompt) + (TEMPLATE_RULE if template else ''),
                 data, lambda v: check_analysis(v, analysis_version))
             if not any(c['id'] == op['id'] for c in run['clarifications']):
                 answered = op['input_snapshot']['answers']
@@ -741,33 +1073,49 @@ class DemandService:
             if op['design_format_version'] != demand_design.FORMAT_VERSION:
                 raise ValueError('设计方案格式不支持，请保留历史并重新生成。')
             brief = op['brief_snapshot']
-            self.checkpoint(run, op, job, '生成完整文字设计方案' if kind == 'demand_design_generate' else '修订文字设计方案')
-            value = await self.ask(run, op, 'design', demand_design.PROMPT,
-                demand_design.model_input(brief, op['base'], op['instruction']),
-                lambda v: demand_design.validate(v, brief), system_prompt=demand_design.SYSTEM)
             versions = run.setdefault('design_versions', [])
-            if not any(v['id'] == op['id'] for v in versions):
-                versions.append({'id': op['id'], 'version': len(versions) + 1, 'content_version': op['design_format_version'],
-                    'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
-                    'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
-                    'instruction': op['instruction'], 'content': value})
-            # Save text before starting images; retries reuse both text and saved assets.
-            self.save(run)
+            count, generated = op.get('variants', 1), []
+            def validate(v):
+                demand_design.validate(v, brief)
+                if op.get('element_changes'):
+                    check_element_changes(v, op['element_changes'])
+            for i in range(1, count + 1):
+                vid = op['id'] if i == 1 else f"{op['id']}-v{i}"
+                stage = '生成完整文字设计方案' if kind == 'demand_design_generate' else '修订文字设计方案'
+                self.checkpoint(run, op, job, stage + (f' {i}/{count}' if count > 1 else ''))
+                value = await self.ask(run, op, 'design' if i == 1 else f'design_{i}', demand_design.PROMPT,
+                    demand_design.model_input(brief, op['base'], op['instruction'], [g['content'] for g in generated]),
+                    validate, system_prompt=demand_design.SYSTEM)
+                if not any(v['id'] == vid for v in versions):
+                    record = {'id': vid, 'version': len(versions) + 1, 'content_version': op['design_format_version'],
+                        'at': utc_now(), 'binding': deepcopy(op['binding']), 'selection': deepcopy(op['selection']),
+                        'brief_id': brief['id'], 'brief_snapshot': deepcopy(brief), 'base_id': op['base']['id'] if op['base'] else None,
+                        'instruction': op['instruction'], 'content': value}
+                    if count > 1:
+                        record.update(group_id=op['id'], variant=i, variants=count)
+                    versions.append(record)
+                    # Save each variant and the text before images; retries reuse saved results.
+                    self.save(run)
+                generated.append(next(v for v in versions if v['id'] == vid))
             if op.get('include_images'):
                 from lab import demand_images
                 from lab.image_service import image_sizes
                 if 'design_snapshot' not in op:
                     design = next(v for v in versions if v['id'] == op['id'])
-                    apps = design['content']['applications']
-                    index = next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0)
-                    op.update(design_snapshot=deepcopy(design), application_index=index,
-                              application=deepcopy(apps[index]), image_base=None,
-                              size=image_sizes(op['image_config']['provider'])[0])
+                    if op.get('image_mode') == 'pattern':
+                        op.update(design_snapshot=deepcopy(design), image_base=None, **demand_images.pattern_target(op['image_config']['provider']))
+                    else:
+                        apps = design['content']['applications']
+                        index = next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0)
+                        op.update(design_snapshot=deepcopy(design), application_index=index,
+                                  application=deepcopy(apps[index]), image_base=None,
+                                  size=image_sizes(op['image_config']['provider'])[0])
                     self.save(run)
                 await demand_images.execute(self, run, op, job)
         elif kind == 'demand_candidates':
             context = await self.context(run, op, job)
             self.checkpoint(run, op, job, '生成产品候选')
+            capacity = (context['summary']['inputs'].get('capacity') or {}) if format_version >= 4 else {}
             def check(v):
                 items = v.get('candidates')
                 if not isinstance(items, list) or len(items) != op['count']:
@@ -779,6 +1127,8 @@ class DemandService:
                         strings(item.get('capability_gaps'), '需确认能力')
                         check_story_mapping(item)
                         check_element_refs(item['story_mapping'], context['evidence'])
+                    if format_version >= 4:
+                        check_requirements(item)
                     strings(item.get('assumptions'), '策划假设')
                     strings(item.get('questions'), '待确认事项')
                     check_facts(item, context['evidence'])
@@ -787,12 +1137,30 @@ class DemandService:
                     if len(signatures) != len(items):
                         raise ValueError('候选不能仅更换名称，需在形态、使用体验或文化表达上有区别。')
             legacy_prompt = 'DEMAND_CANDIDATES：生成指定数量的不同产品建议，不是营销方案。返回 {"candidates":[{"name":"产品名称","form":"产品形态","audience":"人群","scene":"场景","theme":"文化主题","reason":"需求与推荐理由","capability_fit":"能力匹配判断","design":"差异化设计建议","assumptions":["假设"],"questions":["待确认"],"facts":[]}]}。按用户能力和限制给建议，不替换商家身份，不能保证销量。文化故事没有证据时只能作为创意。'
-            value = await self.ask(run, op, 'candidates',
-                (CANDIDATE_V3 if format_version >= 3 else CANDIDATE_V2) + PROACTIVE_RULES if format_version >= 2 else legacy_prompt,
-                {**context, 'count': op['count'], 'previous_candidates': next((b['candidates'] for b in reversed(run['candidate_rounds']) if not stale(run, b)), [])}, check)
+            prompt = ({4: CANDIDATE_V4, 3: CANDIDATE_V3}.get(min(format_version, 4), CANDIDATE_V2) + PROACTIVE_RULES) if format_version >= 2 else legacy_prompt
+            data = {**context, 'count': op['count'], 'previous_candidates': next((b['candidates'] for b in reversed(run['candidate_rounds']) if not stale(run, b)), [])}
+            template = context['summary']['inputs'].get('template')
+            if format_version >= 4 and template:
+                data['template_focus'] = TEMPLATES[template]['focus']
+            value = await self.ask(run, op, 'candidates', prompt, data, check)
+            capacity_log = [{'name': c['name'], 'problems': problems} for c in value['candidates']
+                            for problems in [capacity_violations(c, capacity)] if problems] if capacity else []
+            if capacity_log:
+                # One automatic correction; a still-violating answer fails the operation and can be retried.
+                self.checkpoint(run, op, job, '按产能修正产品候选')
+                def check_fixed(v):
+                    check(v)
+                    remaining = [c['name'] + '：' + '；'.join(problems) for c in v['candidates'] for problems in [capacity_violations(c, capacity)] if problems]
+                    if remaining:
+                        raise ValueError('修正后仍超出产能：' + ' / '.join(remaining))
+                value = await self.ask(run, op, 'candidates_fix', prompt, {**data, 'round_to_fix': value['candidates'],
+                    'candidates_to_fix': [x['name'] for x in capacity_log], 'capacity_violations': {x['name']: x['problems'] for x in capacity_log}}, check_fixed)
             if not any(c['id'] == op['id'] for c in run['candidate_rounds']):
-                run['candidate_rounds'].append({'id': op['id'], 'format_version': format_version, 'binding': deepcopy(op['binding']), 'context': deepcopy(context),
-                    'at': utc_now(), 'candidates': [{**c, 'id': 'C' + str(i)} for i, c in enumerate(value['candidates'], 1)]})
+                record = {'id': op['id'], 'format_version': format_version, 'binding': deepcopy(op['binding']), 'context': deepcopy(context),
+                          'at': utc_now(), 'candidates': [{**c, 'id': 'C' + str(i)} for i, c in enumerate(value['candidates'], 1)]}
+                if format_version >= 4:
+                    record['capacity_log'] = capacity_log
+                run['candidate_rounds'].append(record)
         else:
             selected = op['selection']
             batch = next(r for r in run['candidate_rounds'] if r['id'] == selected['round_id'])
@@ -810,19 +1178,26 @@ class DemandService:
                     check_story_mapping(v)
                     check_element_refs(v['story_mapping'], context['evidence'])
                     check_deliverables(v)
+                if format_version >= 4:
+                    check_package(v, context['summary']['inputs'], context['evidence'])
+                if op.get('element_changes'):
+                    check_element_changes(v, op['element_changes'])
                 check_facts(v, context['evidence'])
             legacy_prompt = 'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。'
             data = {'context': context, 'candidate': candidate, 'base': op['base'], 'instruction': op['instruction']}
             if format_version >= 3:
                 data['decision_context'] = decision_context(op['input_snapshot'], candidate)
+            template = context['summary']['inputs'].get('template')
+            if format_version >= 4 and template:
+                data['template_focus'] = TEMPLATES[template]['focus']
             value = await self.ask(run, op, 'brief',
-                (BRIEF_V3 if format_version >= 3 else BRIEF_V2) + PROACTIVE_RULES if format_version >= 2 else legacy_prompt,
+                ({4: BRIEF_V4, 3: BRIEF_V3}.get(min(format_version, 4), BRIEF_V2) + PROACTIVE_RULES) if format_version >= 2 else legacy_prompt,
                 data, check)
             if not any(b['id'] == op['id'] for b in run['briefs']):
                 run['briefs'].append({'id': op['id'], 'format_version': format_version, 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
                     'selection': deepcopy(selected), 'summary': deepcopy(op['input_snapshot']), 'evidence': deepcopy(context['evidence']),
                     'knowledge_missing': context['knowledge_missing'], 'culture_missing': context.get('culture_missing', True),
-                    'topic': deepcopy(context['topic']), 'candidate': deepcopy(candidate), 'content': value})
+                    'topic': deepcopy(context['topic']), 'topic_score': deepcopy(context.get('topic_score')), 'candidate': deepcopy(candidate), 'content': value})
         op.update(status='success', message='本阶段完成，请查看结果并选择下一步。', finished_at=utc_now())
         self.save(run)
         job.update(status='success', message=op['message'])
@@ -843,8 +1218,7 @@ def export_markdown(run, brief):
     lines += [f"- {FIELDS[k]}：{inputs[k] or '未提供'}" for k in MERCHANT_FIELDS]
     if brief.get('topic'):
         topic = brief['topic']
-        lines += ['', '## 话题定位', '', topic['title'], '',
-                  ('时间已核验，热度未验证。' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作文化参考；热度未验证。')]
+        lines += ['', '## 话题定位', '', topic['title'], '', topic_note(topic)]
     for key, title in BRIEF_FIELDS.items():
         lines += ['', '## ' + title, '', value[key]]
     for key, title in [('assumptions', '策划假设'), ('questions', '待确认事项')]:
@@ -868,9 +1242,15 @@ def mapping_markdown(items):
 
 def candidate_comparison(batch):
     """Use saved content only; never infer missing fields in old candidates."""
-    return [{'产品方向': c['name'], '核心用途': c['purpose'], '主要体验': c['design'],
+    rows = [{'产品方向': c['name'], '核心用途': c['purpose'], '主要体验': c['design'],
              '区别': c['differentiator'], '需确认能力': '；'.join(c['capability_gaps']) or '未列出额外能力缺口，仍需验证方案细节'}
             for c in batch['candidates']]
+    if batch.get('format_version', 1) >= 4:
+        capacity = batch['context']['summary']['inputs'].get('capacity') or {}
+        for row, c in zip(rows, batch['candidates']):
+            row.update({'品类与工艺': c['requirements']['category'] + (' · ' + '、'.join(c['requirements']['crafts']) if c['requirements']['crafts'] else ''),
+                        '潜力（模型判断）': f"{c['potential']['score']}/5", '产能检查': capacity_status(c, capacity)})
+    return rows
 
 
 def brief_sections(run, brief):
@@ -883,7 +1263,8 @@ def brief_sections(run, brief):
                 ('文化主题与故事', value['story'], False),
                 ('具体设计建议', value['design'], False),
                 ('设计交付要求', value['handoff'], False),
-                ('商家能力与硬性限制', '\n'.join(f"- {FIELDS[k]}：{brief['summary']['inputs'][k] or '未提供'}" for k in MERCHANT_FIELDS), False)]
+                ('商家能力与硬性限制', '\n'.join([*(f"- {FIELDS[k]}：{brief['summary']['inputs'][k] or '未提供'}" for k in MERCHANT_FIELDS),
+                                              *('- ' + line for line in structured_lines(brief['summary']['inputs']))]), False)]
     if brief.get('format_version', 1) >= 3:
         sections[2] = ('文化主题与故事', value['story'] + '\n\n**故事到设计的对应（策划建议）**\n\n' + mapping_markdown(value['story_mapping']), False)
         deliveries = []
@@ -892,6 +1273,8 @@ def brief_sections(run, brief):
             if items:
                 deliveries += ['**' + label + '**', '\n'.join(f"- {d['name']}：{d['description']}" for d in items)]
         sections[4] = ('设计交付要求', '\n\n'.join([*deliveries, '**推进顺序与等待条件**', value['handoff']]), False)
+    if value.get('package'):
+        sections.insert(5, ('产品方案包与需求规格书', package_markdown(value['package']), False))
     sections.append(('必要假设与验证', '\n'.join('- ' + x for x in value['assumptions']) or '暂无额外假设。', True))
     followups = []
     for item in value['followups']:
@@ -910,7 +1293,10 @@ def brief_sections(run, brief):
     refs = []
     if brief.get('topic'):
         topic = brief['topic']
-        refs += [topic['title'], '时间已核验，热度未验证。' if topic['date_status'] == 'verified' else '非已核实近期话题，仅作文化参考；热度未验证。']
+        refs += [topic['title'], topic_note(topic)]
+        score = (brief.get('topic_score') or {}).get('score')
+        if score is not None:
+            refs.append(f"话题预测评分：{score:.2f}（{demand_scoring.NOTE}）")
     for fact in value['facts']:
         refs.append('- ' + fact['text'])
         refs += ['  - [' + c['ref'] + '] ' + c['quote'] for c in fact['citations']]

@@ -52,6 +52,10 @@ class DemandModel:
                     item.update(purpose=data['summary']['inputs'].get('purpose') or '重逢纪念', differentiator=f'第{i}段共同记忆的互动',
                                 capability_gaps=['新盒型需确认'], story_mapping=[{'meaning': '重逢', 'element': f'第{i}幅校园剪影',
                                                                             'placement': '标签与盒面', 'reason': '表达共同记忆'}])
+            if '"requirements"' in prompt:
+                for item in value['candidates']:
+                    item.update(requirements={'category': '礼盒包装', 'crafts': [], 'lead_days': None, 'quantity': None},
+                                potential={'score': 3, 'reason': '判断：校友聚会有稳定纪念需求，需验证'})
         elif stage == 'DEMAND_BRIEF':
             value = {'title': '校友聚会产品需求单', **{k: '建议：' + v for k, v in BRIEF_FIELDS.items()},
                      'assumptions': ['为设计建议'], 'questions': ['价格待确认'], 'facts': []}
@@ -64,6 +68,12 @@ class DemandModel:
                     {'meaning': '重逢', 'element': '校园剪影', 'placement': '标签', 'reason': '表达共同记忆'}]
                 value['deliverables'] = [{'name': '瓶身标签概念稿', 'priority': 'core', 'description': '校园剪影构图和配色'},
                                          {'name': '留言卡', 'priority': 'optional', 'description': '留白与手写区域设计'}]
+            if '"package"' in prompt:
+                value['package'] = {'positioning': '校友聚会纪念礼盒', 'audience': '返校校友', 'story': '重逢与共同记忆',
+                    'materials': '礼盒包装与定制标签，工艺待打样', 'patterns': [{'direction': '校园剪影线描'}], 'ip': [],
+                    'pricing': {'low': 80, 'high': 160, 'basis': '同类礼盒参考，需报价验证'},
+                    'risks': [{'item': '交期紧张', 'level': '中', 'response': '提前锁定包材'}],
+                    'specs': [{'item': '数量', 'value': '待定', 'status': '待定'}]}
         elif stage == 'DEMAND_DESIGN':
             from design_fixture import proposal
             value = proposal(data)
@@ -244,7 +254,7 @@ def test_candidate_revision_passes_previous_round(demand):
 def test_copy_only_merchant_and_workspace_validation(demand):
     run = selected(demand)
     copied = demand.demands.merchant(run['id'])
-    assert set(copied) == {'industry', 'capabilities', 'brand', 'constraints'}
+    assert set(copied) == {'industry', 'capabilities', 'brand', 'constraints', 'capacity'}
     second = demand.demands.create({**INPUT, **copied})
     assert not second['candidate_rounds'] and not second['selection'] and not second['research']
     run['workspace'] = 'another'

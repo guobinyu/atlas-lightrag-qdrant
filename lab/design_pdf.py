@@ -14,7 +14,7 @@ from reportlab.pdfbase.ttfonts import TTFont
 from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, PageBreak, Image
 
 from lab.demand_design import sections
-from lab.demand_images import asset_path
+from lab.demand_images import asset_path, selection_key
 
 _FONT_LOCK = Lock()
 
@@ -68,14 +68,17 @@ def export_pdf(service, run, design):
             text = text.replace('**', '').replace('`', '')
             story.append(para(text, style))
     assets = [a for a in run.get('image_assets', []) if a['design_id'] == design['id']]
+    # Application drafts first, then tileable pattern drafts as their own section.
+    assets.sort(key=lambda a: a.get('mode') == 'pattern')
     if not assets:
         story += [para('设计图稿', 'heading'), para('此设计版本尚无已保存图稿。')]
     for asset in assets:
+        pattern = asset.get('mode') == 'pattern'
         story.append(PageBreak())
-        story.append(para('设计图稿 · ' + asset['application_name'], 'heading'))
-        chosen = run.get('image_selections', {}).get(design['id'] + ':' + str(asset['application_index'])) == asset['id']
+        story.append(para('纹样初稿' if pattern else '设计图稿 · ' + asset['application_name'], 'heading'))
+        chosen = run.get('image_selections', {}).get(selection_key(asset)) == asset['id']
         story.append(para(f"图稿版本 {asset['version']} · {asset['title']}" + (' · 已选用' if chosen else '')))
-        story.append(para('平面概念稿，供设计讨论；像素尺寸不代表生产尺寸。'))
+        story.append(para('可平铺纹样单元初稿，供图案设计参考；未经接缝与分色检查。' if pattern else '平面概念稿，供设计讨论；像素尺寸不代表生产尺寸。'))
         try:
             raw = asset_path(service, run['id'], asset['path']).read_bytes()
             image = Image(BytesIO(raw))

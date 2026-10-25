@@ -9,6 +9,12 @@ from test_demand_ui import page
 from lab.demands import export_bundle, export_markdown, candidate_comparison
 
 
+@pytest.fixture(autouse=True)
+def content_v3(monkeypatch):
+    # These tests cover the v3 format; v4 has its own tests.
+    monkeypatch.setattr('lab.demands.CONTENT_FORMAT_VERSION', 3)
+
+
 def test_v3_comparison_selection_and_design_handoff(demand):
     inputs = {**INPUT, 'purpose': '聚会后带走纪念'}
     run = candidates(demand, inputs)
