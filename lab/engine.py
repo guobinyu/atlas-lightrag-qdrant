@@ -139,6 +139,10 @@ class Engine:
             await self.rag.initialize_storages()
             self.collection = self.rag.chunks_vdb.final_namespace
             self.workspace_filter = models.Filter(must=[workspace_filter_condition(cfg.workspace)])
+            from lab.culture.index import CultureIndex
+            # Plain client: culture vectors are not LightRAG retrieval and stay out of traces.
+            self.culture_index = CultureIndex(self.client, self.embedder, cfg.workspace, cfg.embedding_dim)
+            await self.workbench.culture.sync(self.culture_index)
             existing_count = self.client.count(self.collection, count_filter=self.workspace_filter, exact=True).count
             if cfg.seed_demo and existing_count == 0:
                 paths = sorted((ROOT / "examples").glob("*.md"))
@@ -257,6 +261,22 @@ class Engine:
             raise ValueError("品牌知识检索失败，请重试当前阶段。")
         return [{"chunk_id": c.get("chunk_id"), "content": c.get("content", ""),
                  "file_path": c.get("file_path", "未知来源")} for c in data.get("data", {}).get("chunks", [])[:5]]
+
+    async def culture_context(self, question, hint=''):
+        """Task-internal culture element retrieval; caller already holds gate and owns this loop."""
+        return await self.workbench.culture.context(self.culture_index, question, hint)
+
+    def culture_search(self, question, kinds=None, themes=None):
+        self.ready.result()
+        if not 1 <= len(question.strip()) <= 500:
+            raise ValueError('请输入 1–500 字符的检索内容。')
+        async def search():
+            return await self.workbench.culture.search(self.culture_index, question.strip(), kinds=kinds, themes=themes)
+        return self._submit_exclusive(search)
+
+    def culture_sync(self):
+        self.ready.result()
+        return self._submit_exclusive(self.workbench.culture.sync, self.culture_index)
 
     async def _query(self, trace, question, top_k, threshold):
         self.active_trace = trace

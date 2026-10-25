@@ -57,6 +57,8 @@ class Workspace:
         from lab.ontology.service import SemanticService
         self.semantic = SemanticService(self.directory / "ontology", self)
         self.semantic.auto_publish()
+        from lab.culture.service import CultureService
+        self.culture = CultureService(self.directory / "culture")
         from lab.campaigns import CampaignService
         self.campaigns = CampaignService(self)
         self.campaigns.interrupt()
@@ -78,6 +80,8 @@ class Workspace:
                     value['message'] = '营销任务已中断；已保存资料和版本，可在热点营销页重试失败阶段。'
                 if value['kind'].startswith('demand_'):
                     value['message'] = '需求任务已中断；可在产品需求探索页重试已保存阶段。'
+                if value['kind'].startswith('culture_'):
+                    value['message'] = '文化解码已中断；已入库素材保留，可在文化知识库页重试未完成文本块。'
                 path.write_text(json.dumps(value, ensure_ascii=False, indent=2), encoding="utf-8")
 
     def emit(self, event, data):
@@ -98,6 +102,8 @@ class Workspace:
             return self._start_campaign(kind, inputs)
         if kind in {"semantic", "semantic_retry", "semantic_auto"}:
             return self._start_semantic(kind, inputs)
+        if kind in {"culture_decode", "culture_retry", "culture_auto"}:
+            return self._start_culture(kind, inputs)
         if kind not in {"collect", "build", "retry"}:
             raise ValueError("未知工作类型。")
         if kind != "retry" and not 1 <= len(inputs) <= 10:
@@ -320,6 +326,70 @@ class Workspace:
                     job.update(message="任务结束；本体校验和模型证据检查均通过的陈述已自动发布。数量缺口和未发布原因请查看结果。")
                 except Exception as exc:
                     job.update(status="failed", message=type(exc).__name__ + "：语义任务失败，详情请查看校验报告。")
+                finally:
+                    job.update(finished_at=utc_now())
+                    self.active = None
+                    self.engine.gate.release()
+                return job.snapshot()
+            return asyncio.run_coroutine_threadsafe(run(), self.engine.loop), job
+        except Exception:
+            self.active = None
+            self.engine.gate.release()
+            raise
+
+    def _start_culture(self, kind, inputs):
+        self.llm.settings.validate()
+        if kind == 'culture_auto' and (not isinstance(inputs.get('topic'), str) or not 2 <= len(inputs['topic'].strip()) <= 300
+                                       or type(inputs.get('limit')) is not int or not 1 <= inputs['limit'] <= 10):
+            raise ValueError('请输入 2–300 字符的主题，数量为 1–10。')
+        if not self.engine.gate.acquire(blocking=False):
+            raise ValueError("已有检索或构建在执行，请等待完成。")
+        try:
+            model = self.llm.settings.public()
+            ids, batch_id = [], None
+            if kind == 'culture_decode':
+                ids = inputs['source_ids']
+                batch_id = self.culture.create_batch([self.sources.get(i) for i in ids], model)
+            elif kind == 'culture_retry':
+                batch_id = inputs['batch_id']
+                ids = [s['id'] for s in self.culture.batch(batch_id)['sources']]
+                self.culture.prepare_retry(batch_id, [self.sources.get(i) for i in ids], model)
+            job = Job(self.job_dir, kind, ids)
+            job.update(batch_id=batch_id, model=model)
+            if kind == 'culture_auto':
+                job.update(topic=inputs['topic'].strip(), requested=inputs['limit'])
+            self.active = job
+            async def run():
+                try:
+                    bid, partial = batch_id, False
+                    if kind == 'culture_auto':
+                        from lab.demo import collect
+                        def progress(event, data):
+                            job.emit(event, data)
+                            if event == '资料已保存':
+                                job.update(collected=data['count'])
+                        topic = inputs['topic'].strip()
+                        queries, collected, failures = await collect(topic, inputs['limit'], self.llm, self.sources, progress)
+                        job.update(source_ids=[s['id'] for s in collected], queries=queries, failures=failures)
+                        if not collected:
+                            job.update(status='failed', message='没有读取到可用正文，未创建解码批次。可调整主题后重试。')
+                            return job.snapshot()
+                        bid = self.culture.create_batch(collected, model, topic=topic)
+                        partial = len(collected) < inputs['limit']
+                        job.update(batch_id=bid)
+                    state = await self.culture.run(bid, self.llm, job.emit)
+                    job.emit('culture.index.started', {})
+                    index = await self.culture.sync(self.engine.culture_index)
+                    job.update(status='partial' if partial and state == 'success' else state,
+                               culture_result={**self.culture.summary(bid), 'index': index},
+                               message='解码结束；引文能在原文定位的素材与关系已入库并更新向量索引。未入库原因请在批次记录中查看。')
+                except Exception as exc:
+                    from lab.engine import safe_error
+                    message = safe_error(exc, self.engine.settings)
+                    if self.llm.settings.api_key:
+                        message = message.replace(self.llm.settings.api_key, '[redacted]')
+                    job.emit('job.failed', {'message': message, 'error_type': type(exc).__name__})
+                    job.update(status='failed', message=message)
                 finally:
                     job.update(finished_at=utc_now())
                     self.active = None

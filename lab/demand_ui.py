@@ -55,6 +55,10 @@ def evidence_view(evidence):
         with st.expander(f"[{ref}] {item.get('title') or item.get('file_path') or '知识库片段'}"):
             if item.get('url'):
                 st.link_button('打开来源', item['url'])
+            if item.get('card'):
+                st.caption('文化素材摘要（' + ('设计解读，不作为史实' if item['basis'] == 'interpretation' else '资料记载') + '）')
+                st.text(item['card'])
+                st.caption('原文引文')
             st.text(item.get('text') or item.get('content', ''))
             if item.get('analysis_truncated'):
                 st.caption('本次分析使用正文前 9,000 字符。')
@@ -422,6 +426,8 @@ def demand_page(engine):
             st.warning('这轮候选与当前条件不一致，可查看，不能直接用于当前设计需求单。')
         if batch['context']['knowledge_missing']:
             st.info('未检索到相关本地知识。产品方向为策划建议，不代表获得专业知识库支持。')
+        if batch['context'].get('culture_missing') is True:
+            st.info('文化知识库中没有匹配的纹样或配色素材，可在「文化知识库」解码相关资料后重新生成。')
         if batch.get('format_version', 1) >= 3:
             st.write('本轮方案对比')
             st.table(candidate_comparison(batch))

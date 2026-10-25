@@ -19,6 +19,7 @@ palette.role 只能为 main、secondary 或 accent，不允许 support 等其他
 沿用来源文化故事并细化视觉，不另起无关主线。facts 中外部事实只能引用 evidence 的实际 ref 及连续原文；没有来源时 facts=[]，故事标为创意。后续事项聚焦当前设计，说明责任、时点和推进方式，不凑问题，也不将历史已解决问题照抄成待办。
 有 base 时按 instruction 修订完整方案，未要求变化的概念、故事和交付保留；涉及配色或构图的修改要同步到各应用。若修改意见冲突硬性条件，保留条件并在 followups 说明先修改上游需求。不能把“仅输出文字”的系统边界写成下游不能制作设计稿。
 assumptions 是字符串数组；其余对象列表严格遵循字段结构，不输出图片或不存在的文件链接。
+evidence 中 M 开头的是文化知识库素材（card 为摘要，text 为原文引文，colors 为素材配色）。采用某素材时在对应 story_mapping 项或 palette 项加 "element_ref":"M1"；palette 项引用配色素材时 hex 必须取自该素材 colors。interpretation 素材只作创意依据，不写进 facts。未采用素材时不填该字段，不编造素材编号。
 '''
 
 
@@ -36,9 +37,10 @@ def model_input(brief, base, instruction):
 
 
 def validate(value, brief):
-    from lab.demands import texts, strings, check_facts, check_story_mapping, check_followups
+    from lab.demands import texts, strings, check_facts, check_story_mapping, check_followups, check_element_refs
     texts(value, ('title', 'concept', 'audience_scene', 'story', 'composition', 'typography', 'handoff'))
     check_story_mapping(value)
+    check_element_refs(value['story_mapping'], brief['evidence'])
     strings(value.get('assumptions'), '设计假设')
     check_followups(value)
     check_facts(value, brief['evidence'])
@@ -51,6 +53,11 @@ def validate(value, brief):
             raise ValueError('配色角色或 HEX 色值无效。')
     if not {'main', 'secondary', 'accent'} <= {c['role'] for c in palette}:
         raise ValueError('需要主色、辅助色和点缀色。')
+    check_element_refs(palette, brief['evidence'])
+    for color in palette:
+        source = brief['evidence'].get(color.get('element_ref'), {})
+        if source.get('colors') and color['hex'].upper() not in {c['hex'].upper() for c in source['colors']}:
+            raise ValueError('引用配色素材时，HEX 必须取自该素材的配色。')
     colors = {c['hex'].upper() for c in palette}
     copy = value.get('copywriting')
     if not isinstance(copy, list) or not copy:

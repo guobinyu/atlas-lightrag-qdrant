@@ -42,13 +42,17 @@ BRIEF_V2 = '''DEMAND_BRIEF：将选中产品整理成可交给下游开展概念
 商家信息由程序附加，不得编造品牌或能力。有旧版本时按修改意见修订，未要求变化的方案保留；旧版问题清单转换为有责任角色、时点和推进方式的事项。
 '''
 
+CULTURE_RULES = '''evidence 中 M 开头的是文化知识库素材：card 为素材摘要，text 为原文引文，basis 为 documented（资料记载）或 interpretation（设计解读）。优先选用与人群、场景、用途相符的素材转化为纹样、配色和叙事；采用某素材时在对应 story_mapping 项加 "element_ref":"M1"，未采用时不填该字段。
+interpretation 素材只能作为创意依据，不得写进 facts；facts 引用 M 素材时 quote 必须是其 text 中的连续原文。没有 M 素材或素材不适合时照常给创意建议，不编造素材编号。
+'''
+
 CANDIDATE_V3 = '''DEMAND_CANDIDATES：按当前已确认的人群、场景、用途和能力，生成指定数量、可以比较的产品方向。返回 {"candidates":[{"name":"名称","form":"产品形态及组成","audience":"人群","scene":"使用场景","purpose":"核心用途","theme":"文化主题","reason":"为什么推荐","differentiator":"与同批其他方案的主要区别","capability_fit":"与现有能力的匹配判断","capability_gaps":["额外需要确认的生产或配套能力"],"story":"文化故事及情感主线，标明创意与史实","visual_elements":"视觉元素与表达意图","story_mapping":[{"meaning":"故事含义","element":"设计元素","placement":"应用位置","reason":"为何这样表达"}],"design":"主要使用体验、推荐的设计动作及理由","assumptions":["必要假设及验证方式"],"questions":["少量尚未解决的关键未知"],"facts":[]}]}。
 各候选在形态、使用体验或文化表达上有实际区别，不能只换名称或颜色；differentiator 具体说明区别，不写泛泛的独特、有文化。已明确的人群、场景、用途和硬性限制是各候选共同边界，不为制造差异任意改变。条件未知时可建议并标清假设，不把未采纳的探索建议当作用户事实。
 当确认用途是聚会后带走纪念时，每个方案都围绕带走纪念设计，不能自行增加现场开瓶、共饮或转赠作为必需用途；明确用途不是可随意扩大的建议。
 每个 story_mapping 至少一项，将故事含义具体转成元素、位置和表达理由，不仅罗列花纹。原创寓意写为创意，文化事实仍按 facts 引用当前资料。不得编造典故。
 容量、瓶型、材料和工艺是建议，不是商家已具备的能力；新增能力列入 capability_gaps，已有能力充分时可为空。不得因桂花视觉推定桂花配方，或因地域文化推定销售区域。预算数量未知不阻止建议。不凑问题数量，也不把设计选择全交回用户。
 assumptions、questions、capability_gaps 必须是字符串数组，每项只写文本，禁止写成对象。
-'''
+''' + CULTURE_RULES
 
 BRIEF_V3 = '''DEMAND_BRIEF：把当前选中的产品细化成下游能开始概念设计的文字输入，保持与最新用户条件和所选方向一致。返回 {"title":"标题","overview":"推荐产品、组成、差异化和理由","audience_scene":"为谁设计、场景和核心用途","product_goals":"形态及设计目标","story":"延续所选候选的文化故事，区分史实与创作","story_mapping":[{"meaning":"故事含义","element":"设计元素","placement":"应用位置","reason":"表达理由"}],"design":"构图、配色、文字和应用建议及理由","deliverables":[{"name":"具体交付名称","priority":"core 或 optional","description":"具体设计工作和范围"}],"handoff":"第一轮推进顺序、现在可开展的工作和需等待哪些资料的工作","assumptions":["必要假设与验证方式"],"followups":[{"item":"后续事项","category":"商家决定或设计探索或资料补齐或后续验证","owner":"建议责任角色","timing":"确认时点","approach":"未确认期间如何推进或等待什么"}],"facts":[]}。
 story_mapping 至少一项，从所选候选延续并细化，不另起无关故事；旧候选缺少映射时可根据其原故事与设计补充。deliverables 至少一项 core，每项具体到标签、盒面、卡片、图案或服装应用稿等实际设计工作，区分核心与可选，不生成图片或冒充生产技术规范。
@@ -58,7 +62,7 @@ decision_context 分开提供用户确认条件、选定方向、方案规格与
 商家能力与限制由程序原样附加。桂花视觉不代表风味研发。品牌文件、尺寸及经确认的背标文案由商家补充，先开展不依赖这些资料的概念工作；不得要求设计师决定配方或编造法定文案。不承诺工艺可行性、识别效果或销量。
 有 base 时按修改意见修订，未要求变化的方向和交付保留；旧版内容升级为上述结构，不改写原记录。若修改意见与用户硬性限制冲突，保留限制并在 followups 说明需要用户修改需求，不擅自覆盖。
 assumptions 必须是字符串数组，每项将假设及验证方式合写为一段文本，禁止使用对象；story_mapping、deliverables、followups 才是对象数组。
-'''
+''' + CULTURE_RULES
 
 MERCHANT_FIELDS = ('industry', 'capabilities', 'brand', 'constraints')
 BRIEF_FIELDS = {'overview': '项目与产品概述', 'audience_scene': '目标人群、场景与需求',
@@ -228,6 +232,18 @@ def check_facts(value, evidence):
             source = evidence.get(cite['ref'])
             if source is None or cite['quote'] not in (source.get('text') or source.get('content') or ''):
                 raise ValueError('事实引用未知来源或引文无法定位。')
+            if source.get('basis') == 'interpretation':
+                raise ValueError('设计解读类文化素材不能作为事实依据。')
+
+
+def check_element_refs(items, evidence):
+    """Optional element_ref on mapping items must name a culture element frozen in this context."""
+    for item in items:
+        ref = item.get('element_ref')
+        if ref is None:
+            continue
+        if not isinstance(ref, str) or 'element_id' not in evidence.get(ref, {}):
+            raise ValueError('element_ref 必须引用本次资料中的文化素材（M 开头）。')
 
 
 def clarification_rounds(run):
@@ -680,8 +696,12 @@ class DemandService:
         query = ' '.join([op['input_snapshot']['inputs'].get(k, '') for k in ('purpose', 'audience', 'scene', 'theme', 'request', 'industry', 'capabilities')] + [topic['title'] if topic else ''])[:2000]
         chunks = await self.work.engine.campaign_context(query)
         evidence.update({'K' + str(i): c for i, c in enumerate(chunks[:5], 1)})
+        self.checkpoint(run, op, job, '匹配文化素材')
+        hint = ' '.join(op['input_snapshot']['inputs'].get(k, '') for k in ('audience', 'scene', 'purpose', 'theme', 'request'))
+        elements = await self.work.engine.culture_context(query, hint)
+        evidence.update({'M' + str(i): e for i, e in enumerate(elements, 1)})
         value = {'summary': deepcopy(op['input_snapshot']), 'topic': deepcopy(topic), 'evidence': deepcopy(evidence),
-                 'knowledge_missing': not chunks, 'instruction': op['instruction']}
+                 'knowledge_missing': not chunks, 'culture_missing': not elements, 'instruction': op['instruction']}
         op['cache']['context'] = value
         self.save(run)
         return value
@@ -758,6 +778,7 @@ class DemandService:
                         texts(item, ('purpose', 'differentiator'))
                         strings(item.get('capability_gaps'), '需确认能力')
                         check_story_mapping(item)
+                        check_element_refs(item['story_mapping'], context['evidence'])
                     strings(item.get('assumptions'), '策划假设')
                     strings(item.get('questions'), '待确认事项')
                     check_facts(item, context['evidence'])
@@ -787,6 +808,7 @@ class DemandService:
                     strings(v.get('questions'), '待确认事项')
                 if format_version >= 3:
                     check_story_mapping(v)
+                    check_element_refs(v['story_mapping'], context['evidence'])
                     check_deliverables(v)
                 check_facts(v, context['evidence'])
             legacy_prompt = 'DEMAND_BRIEF：将选中的产品细化为可交给设计方的文字需求单。返回 {"title":"标题","overview":"概述","audience_scene":"人群场景需求","product_goals":"形态目标","story":"文化主题及创意IP故事，区分史实与创作","design":"图案色彩文字材料建议","handoff":"设计方工作要求","assumptions":["假设"],"questions":["待确认"],"facts":[]}。有旧版本时按修改意见修订，未要求改动的内容保留。商家信息由程序附加，不得自行命名品牌或补造能力。'
@@ -799,7 +821,8 @@ class DemandService:
             if not any(b['id'] == op['id'] for b in run['briefs']):
                 run['briefs'].append({'id': op['id'], 'format_version': format_version, 'version': len(run['briefs']) + 1, 'at': utc_now(), 'binding': deepcopy(op['binding']),
                     'selection': deepcopy(selected), 'summary': deepcopy(op['input_snapshot']), 'evidence': deepcopy(context['evidence']),
-                    'knowledge_missing': context['knowledge_missing'], 'topic': deepcopy(context['topic']), 'candidate': deepcopy(candidate), 'content': value})
+                    'knowledge_missing': context['knowledge_missing'], 'culture_missing': context.get('culture_missing', True),
+                    'topic': deepcopy(context['topic']), 'candidate': deepcopy(candidate), 'content': value})
         op.update(status='success', message='本阶段完成，请查看结果并选择下一步。', finished_at=utc_now())
         self.save(run)
         job.update(status='success', message=op['message'])
@@ -839,7 +862,8 @@ def export_markdown(run, brief):
 
 
 def mapping_markdown(items):
-    return '\n\n'.join(f"- **{m['meaning']}** → {m['element']} → {m['placement']}\n\n  表达理由：{m['reason']}" for m in items)
+    return '\n\n'.join(f"- **{m['meaning']}** → {m['element']} → {m['placement']}" + (f"（文化素材 {m['element_ref']}）" if m.get('element_ref') else '')
+                       + f"\n\n  表达理由：{m['reason']}" for m in items)
 
 
 def candidate_comparison(batch):

@@ -90,7 +90,9 @@ def work(tmp_path, monkeypatch):
     ready.set_result(True)
     async def context(question):
         return []
-    engine = SimpleNamespace(loop=loop, gate=threading.Lock(), ready=ready, campaign_context=context,
+    async def culture(question, hint=''):
+        return []
+    engine = SimpleNamespace(loop=loop, gate=threading.Lock(), ready=ready, campaign_context=context, culture_context=culture,
                              settings=SimpleNamespace(workspace='fixture', embedding_api_key='', qdrant_api_key=''))
     instance = Workspace.__new__(Workspace)
     instance.engine = engine
