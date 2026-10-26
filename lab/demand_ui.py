@@ -272,7 +272,7 @@ def candidate_detail(batch, candidate):
     facts_view(candidate['facts'])
 
 
-def candidate_cards(engine, run, batch, busy):
+def candidate_cards(engine, run, batch, busy, after_select=None):
     """Sketch-style candidate cards: category icon, difference, model-judged potential and capacity check."""
     service = engine.workbench.demands
     historical = stale(run, batch)
@@ -281,7 +281,8 @@ def candidate_cards(engine, run, batch, busy):
     for candidate in batch['candidates']:
         with st.container(border=True, key=f"candidate-{batch['id']}-{candidate['id']}"):
             category = candidate['requirements']['category'] if v4 else candidate['form']
-            st.markdown(f"**{category_icon(category)} {escape(candidate['name'])}**")
+            number = candidate['id'].removeprefix('C')
+            st.markdown(f"**{category_icon(category)} 候选 {number} · {escape(candidate['name'])}**")
             st.write(candidate.get('differentiator') or candidate['design'])
             if v4:
                 req = candidate['requirements']
@@ -298,6 +299,8 @@ def candidate_cards(engine, run, batch, busy):
                          disabled=busy or historical or selected, type='primary' if selected else 'secondary', width='stretch'):
                 ok, _ = action(engine, service.select_candidate, run['id'], batch['id'], candidate['id'])
                 if ok:
+                    if after_select:
+                        after_select()
                     st.rerun()
 
 
@@ -492,6 +495,76 @@ def clarification_dialog(engine, identifier, stage):
     confirmation_view(engine, run, analysis)
 
 
+def inline_questions(engine, run, analysis, await_key=None):
+    """Clarification questions in the page instead of a dialog; submitting a round starts the next analysis."""
+    service = engine.workbench.demands
+    busy = engine.workbench.active is not None
+    ok, session = action(engine, service.clarification_session, run['id'], analysis['id'])
+    if not ok:
+        return
+    index = session['cursor']
+    q = session['questions'][index]
+    saved = session['answers'].get(q['id'], {})
+    key = f"inline-q-{session['id']}-{q['id']}-"
+    st.caption(f"第 {session['round']} 轮追问 · 第 {index + 1} / {len(session['questions'])} 题")
+    st.markdown('**' + escape(q['text']) + '**')
+    choice = st.pills('可选回答', q['options'], default=saved.get('choice') or None, key=key + 'choice', disabled=busy) if q['options'] else None
+    text = st.text_area('补充说明／其他回答', saved.get('text', ''), max_chars=4000, key=key + 'text', disabled=busy, height=90)
+    unknown = st.checkbox('暂不确定，请给建议', saved.get('unknown', False), key=key + 'unknown', disabled=busy)
+    a, b = st.columns(2)
+    last = index == len(session['questions']) - 1
+    if a.button('上一题', key=key + 'back', disabled=busy or index == 0, width='stretch'):
+        if choice or text.strip() or unknown:
+            ok, _ = action(engine, service.save_answer, run['id'], session['id'], index, choice or '', text, unknown, index - 1)
+        else:
+            ok, _ = action(engine, service.move_question, run['id'], session['id'], index - 1)
+        if ok:
+            st.rerun()
+    if b.button('提交本轮回答' if last else '保存并下一题', key=key + 'next', type='primary', disabled=busy, width='stretch'):
+        ok, _ = action(engine, service.save_answer, run['id'], session['id'], index, choice or '', text, unknown, index + 1)
+        if ok and last:
+            ok, result = action(engine, engine.workbench.start, 'demand_analyze', {'run_id': run['id'], 'session_id': session['id']})
+            if ok and await_key:
+                st.session_state[await_key] = {'id': run['id'], 'op': result[1].value['operation_id']}
+        if ok:
+            st.rerun()
+
+
+def design_cards(engine, run, brief, busy, prefix='custom', heading='方案确认区'):
+    from lab import demand_images
+    service = engine.workbench.demands
+    if heading:
+        st.subheader(heading)
+    if not brief:
+        st.caption('先在「方向与元素」中生成设计说明。')
+        return
+    versions = [v for v in run.get('design_versions', []) if v['brief_id'] == brief['id'] and not stale(run, v) and v['selection'] == run['selection']]
+    if not versions:
+        st.caption('在下方生成设计方案，默认一次生成三版供比较。')
+        return
+    latest = versions[-1]
+    shown = [v for v in versions if latest.get('group_id') and v.get('group_id') == latest['group_id']] or versions[-3:]
+    for column, design in zip(st.columns(len(shown)), shown):
+        with column, st.container(border=True, key=f'{prefix}-design-' + design['id']):
+            content = design['content']
+            label = f"方案 {design['variant']}" if design.get('variant') else f"设计版本 {design['version']}"
+            st.markdown(f"**{label} · {escape(content['title'])}**")
+            asset = next((a for a in run.get('image_assets', []) if a['design_id'] == design['id']), None)
+            if asset:
+                try:
+                    st.image(demand_images.asset_path(service, run['id'], asset['path']).read_bytes(), caption=asset['title'] + '（概念图稿）', width='stretch')
+                except (OSError, ValueError):
+                    st.caption('图稿文件不可读取。')
+            st.markdown(swatches(content['palette']), unsafe_allow_html=True)
+            st.caption(content['concept'][:90])
+            st.caption('核心应用：' + '、'.join(a['name'] for a in content['applications'] if a['priority'] == 'core'))
+            chosen = run.get('design_choice') == design['id']
+            if st.button('已确认' if chosen else '确认此方案', key=f'{prefix}-choose-' + design['id'], disabled=busy or chosen,
+                         type='primary' if chosen else 'secondary', width='stretch'):
+                if action(engine, service.choose_design, run['id'], design['id'])[0]:
+                    st.rerun()
+
+
 def adopt_to_draft(prefix, analysis, kind, field):
     draft = st.session_state[prefix + 'draft']
     if draft['invalidated']:
@@ -503,7 +576,7 @@ def adopt_to_draft(prefix, analysis, kind, field):
     draft['expected'][field] = value
 
 
-def confirmation_view(engine, run, analysis, inline=False):
+def confirmation_view(engine, run, analysis, inline=False, auto_search=True):
     service = engine.workbench.demands
     identifier = run['id']
     prefix = f"demand-confirm-{identifier}-{run['revision']}-"
@@ -555,7 +628,7 @@ def confirmation_view(engine, run, analysis, inline=False):
         ok, updated = action(engine, service.confirm, identifier, values, run['revision'], draft['adoptions'])
         if ok:
             close_dialog()
-            if updated['inputs']['path'] == 'trend' and not updated['research_id']:
+            if auto_search and updated['inputs']['path'] == 'trend' and not updated['research_id']:
                 launch(engine, 'demand_search', identifier)
             st.rerun()
     if len(clarification_rounds(run)) < MAX_CLARIFICATION_ROUNDS and st.button('保存摘要并重新分析', key=prefix + 'reanalyze'):
@@ -908,7 +981,10 @@ def image_step(engine, run, design, valid_source, op):
     if mode == 'pattern':
         index = 'pattern'
         st.caption('按方案配色、故事映射和方案包中的纹样方向生成三个方形纹样单元，供图案设计参考；未经接缝与分色检查。')
-        if st.button('生成三版纹样初稿', key=prefix + 'pattern-generate', type='primary', disabled=not enabled or not work.llm.configured):
+        has_patterns = any(a['design_id'] == design['id'] and a.get('mode') == 'pattern' for a in run.get('image_assets', []))
+        # Each click starts a new batch; earlier batches stay in the history below.
+        if st.button('再生成一批纹样初稿（3 张）' if has_patterns else '生成三版纹样初稿', key=prefix + 'pattern-generate',
+                     type='secondary' if has_patterns else 'primary', disabled=not enabled or not work.llm.configured):
             launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], mode='pattern')
     else:
         index = st.selectbox('图稿设计项', list(range(len(apps))),
@@ -917,10 +993,16 @@ def image_step(engine, run, design, valid_source, op):
         sizes = image_sizes(work.images.settings.provider)
         labels = dict(zip(sizes, ('方形', '横向', '纵向')))
         size = st.selectbox('图稿像素规格', sizes, format_func=lambda s: labels[s] + ' · ' + s.replace('x', '×'), key=prefix + work.images.settings.provider + '-size')
-        if st.button('补充生成三版设计图稿', key=prefix + 'generate', type='primary', disabled=not enabled or not work.llm.configured):
+        has_drafts = any(a['design_id'] == design['id'] and a.get('mode', 'application') == 'application' and a['application_index'] == index
+                         for a in run.get('image_assets', []))
+        if st.button('再生成一批效果图（3 张）' if has_drafts else '生成三版效果图', key=prefix + 'generate',
+                     type='secondary' if has_drafts else 'primary', disabled=not enabled or not work.llm.configured):
             launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], application_index=index, size=size)
     step_feedback(engine, run['id'], op, demand_images.KINDS, 'images')
-    st.caption('失败后可补生成未完成图稿；服务端已生成但尚未保存时中断，重试可能再次调用并计费。')
+    if op and op['kind'] in demand_images.KINDS and op['status'] in ('failed', 'interrupted'):
+        st.caption('点「重试失败阶段」只补生成未完成的图稿；服务端已生成但尚未保存时中断，重试可能再次调用并计费。')
+    else:
+        st.caption('每次点击都会新生成一批 3 张，不覆盖已有图稿；之前的批次可在下方「图稿批次与修订历史」中切换查看。')
     assets = [a for a in run.get('image_assets', []) if a['design_id'] == design['id'] and
               (a.get('mode') == 'pattern' if mode == 'pattern' else a.get('mode', 'application') == 'application' and a['application_index'] == index)]
     if not assets:

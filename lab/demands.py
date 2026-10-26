@@ -53,7 +53,7 @@ interpretation 素材只能作为创意依据，不得写进 facts；facts 引�
 '''
 
 CANDIDATE_V3 = '''DEMAND_CANDIDATES：按当前已确认的人群、场景、用途和能力，生成指定数量、可以比较的产品方向。返回 {"candidates":[{"name":"名称","form":"产品形态及组成","audience":"人群","scene":"使用场景","purpose":"核心用途","theme":"文化主题","reason":"为什么推荐","differentiator":"与同批其他方案的主要区别","capability_fit":"与现有能力的匹配判断","capability_gaps":["额外需要确认的生产或配套能力"],"story":"文化故事及情感主线，标明创意与史实","visual_elements":"视觉元素与表达意图","story_mapping":[{"meaning":"故事含义","element":"设计元素","placement":"应用位置","reason":"为何这样表达"}],"design":"主要使用体验、推荐的设计动作及理由","assumptions":["必要假设及验证方式"],"questions":["少量尚未解决的关键未知"],"facts":[]}]}。
-各候选在形态、使用体验或文化表达上有实际区别，不能只换名称或颜色；differentiator 具体说明区别，不写泛泛的独特、有文化。已明确的人群、场景、用途和硬性限制是各候选共同边界，不为制造差异任意改变。条件未知时可建议并标清假设，不把未采纳的探索建议当作用户事实。
+各候选在形态、使用体验或文化表达上有实际区别，不能只换名称或颜色；differentiator 具体说明区别，不写泛泛的独特、有文化；提到同批其他方案时写方案名称，不写“候选2”“方案三”这类编号。已明确的人群、场景、用途和硬性限制是各候选共同边界，不为制造差异任意改变。条件未知时可建议并标清假设，不把未采纳的探索建议当作用户事实。
 当确认用途是聚会后带走纪念时，每个方案都围绕带走纪念设计，不能自行增加现场开瓶、共饮或转赠作为必需用途；明确用途不是可随意扩大的建议。
 每个 story_mapping 至少一项，将故事含义具体转成元素、位置和表达理由，不仅罗列花纹。原创寓意写为创意，文化事实仍按 facts 引用当前资料。不得编造典故。
 容量、瓶型、材料和工艺是建议，不是商家已具备的能力；新增能力列入 capability_gaps，已有能力充分时可为空。不得因桂花视觉推定桂花配方，或因地域文化推定销售区域。预算数量未知不阻止建议。不凑问题数量，也不把设计选择全交回用户。
@@ -480,6 +480,48 @@ def stale(run, result):
     return result['binding'] != binding(run)
 
 
+def search_key(inputs, answers):
+    """What topic search depends on. Capacity and budget only constrain candidates, so changing them keeps topics."""
+    relevant = {k: v for k, v in inputs.items() if k not in ('capacity', 'budget')}
+    return hashlib.sha256(json.dumps([relevant, answers], ensure_ascii=False, sort_keys=True).encode()).hexdigest()
+
+
+def run_search_key(run):
+    return search_key(run['inputs'], run['summaries'][-1]['answers'])
+
+
+def keeps_topics(run, inputs, answers):
+    """Topics survive a requirement change only when search inputs are unchanged and the research records its key."""
+    if search_key(inputs, answers) != run_search_key(run):
+        return False
+    research = next((r for r in run['research'] if r['id'] == run.get('research_id')), None)
+    return research is None or 'search_key' in research
+
+
+def research_current(run, research):
+    if research is None or research['id'] != run.get('research_id'):
+        return False
+    if 'search_key' in research:
+        return research['search_key'] == run_search_key(run)
+    return research['revision'] == run['revision']  # Saved before search keys existed.
+
+
+def current_brief(run):
+    """Latest brief for the current conditions and the selected direction."""
+    return next((b for b in reversed(run['briefs']) if not stale(run, b) and b['selection'] == run['selection']), None)
+
+
+def current_design(run, brief):
+    """The confirmed design, or the latest single one. An unconfirmed group of variants has no current design yet."""
+    if not brief:
+        return None
+    versions = [v for v in run.get('design_versions', []) if v['brief_id'] == brief['id'] and not stale(run, v) and v['selection'] == run['selection']]
+    chosen = next((v for v in versions if v['id'] == run.get('design_choice')), None)
+    if chosen or not versions:
+        return chosen
+    return None if versions[-1].get('group_id') else versions[-1]
+
+
 def current_day():
     return datetime.fromisoformat(utc_now()).astimezone(BEIJING).date()
 
@@ -580,7 +622,7 @@ class DemandService:
         with self.edit():
             run = {'id': uuid.uuid4().hex, 'schema_version': 1, 'workspace': self.work.engine.settings.workspace,
                    'created_at': utc_now(), 'revision': 1, 'inputs': inputs, 'summaries': [], 'clarifications': [],
-                   'research': [], 'research_id': None, 'topic_id': None, 'candidate_rounds': [],
+                   'research': [], 'research_id': None, 'topic_id': None, 'topic_ids': [], 'candidate_rounds': [],
                    'selection': None, 'briefs': [], 'operations': {}, 'approved_revision': None}
             run['summaries'].append({'revision': 1, 'inputs': deepcopy(inputs), 'answers': {}, 'at': utc_now()})
             self.save(run)
@@ -598,10 +640,13 @@ class DemandService:
         with self.edit(identifier) as run:
             previous = run['summaries'][-1]['answers']
             if inputs != clean_inputs(run['inputs']) or answers != previous:
+                keep_topics = keeps_topics(run, inputs, answers)
                 run['revision'] += 1
                 run['inputs'] = inputs
                 run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(inputs), 'answers': deepcopy(answers), 'at': utc_now()})
-                run.update(approved_revision=None, research_id=None, topic_id=None, topic_ids=[], selection=None)
+                run.update(approved_revision=None, selection=None)
+                if not keep_topics:
+                    run.update(research_id=None, topic_id=None, topic_ids=[])
                 self.save(run)
             return run
 
@@ -702,11 +747,14 @@ class DemandService:
                 for session in run.get('clarification_sessions', []):
                     if session['revision'] == run['revision'] and session['status'] == 'draft':
                         session['status'] = 'confirmed'
+                keep_topics = keeps_topics(run, inputs, answers)
                 run['revision'] += 1
                 run['inputs'] = inputs
                 run['summaries'].append({'revision': run['revision'], 'inputs': deepcopy(inputs),
                     'answers': answers, 'at': utc_now()})
-                run.update(research_id=None, topic_id=None, topic_ids=[], selection=None)
+                run['selection'] = None
+                if not keep_topics:
+                    run.update(research_id=None, topic_id=None, topic_ids=[])
             run['summaries'][-1]['exploration'] = exploration
             run['approved_revision'] = run['revision']
             self.save(run)
@@ -734,7 +782,7 @@ class DemandService:
             if not find_topic(run, topic_id):
                 raise ValueError('手动热点不存在。')
         else:
-            research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
+            research = next((r for r in run['research'] if research_current(run, r)), None)
             if not research or topic_id not in {t['id'] for t in research.get('topics', [])}:
                 raise ValueError('请选择当前资料版本中的话题。')
 
@@ -810,7 +858,7 @@ class DemandService:
 
     def topics(self, run):
         today = current_day()
-        research = next((r for r in run['research'] if r['id'] == run['research_id'] and r['revision'] == run['revision']), None)
+        research = next((r for r in run['research'] if research_current(run, r)), None)
         items = [{**t, 'kind': t.get('kind', 'search')} for t in research['topics']] if research else []
         items += deepcopy(run.get('manual_topics', []))
         snapshots = {t['id']: t for t in run.get('calendar_topics', [])}
@@ -995,7 +1043,7 @@ class DemandService:
 
     async def discover(self, run, op, job):
         cache = op['cache']
-        research = cache.setdefault('research', {'id': op['id'], 'revision': run['revision'], 'at': utc_now(),
+        research = cache.setdefault('research', {'id': op['id'], 'revision': run['revision'], 'search_key': run_search_key(run), 'at': utc_now(),
                                                 'search_results': {}, 'sources': [], 'extractions': {}, 'issues': []})
         def check_queries(v):
             strings(v.get('queries'), '检索词', 3)

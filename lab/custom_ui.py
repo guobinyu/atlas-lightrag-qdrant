@@ -4,7 +4,7 @@ from html import escape
 import streamlit as st
 
 from lab.demand_presets import STYLES, TEMPLATES, TEMPLATE_FIELDS
-from lab.demand_ui import (action, brief_step, candidate_cards, capacity_form, confirmation_view, design_step,
+from lab.demand_ui import (action, brief_step, candidate_cards, capacity_form, confirmation_view, design_cards, design_step,
                            enterprise_picker, evidence_view, history_view, launch, round_topics_caption, step_feedback,
                            task_select)
 from lab.demands import FIELDS, MAX_CLARIFICATION_ROUNDS, can_answer, clarification_rounds, stale, structured_lines
@@ -270,40 +270,6 @@ def directions_step(engine, run, busy):
                 evidence_view(batch['context']['evidence'])
     with right, st.container(border=True, key='custom-designer'):
         designer_panel(engine, run, busy)
-
-
-def design_cards(engine, run, brief, busy):
-    from lab import demand_images
-    service = engine.workbench.demands
-    st.subheader('方案确认区')
-    if not brief:
-        st.caption('先在「方向与元素」中生成设计说明。')
-        return
-    versions = [v for v in run.get('design_versions', []) if v['brief_id'] == brief['id'] and not stale(run, v) and v['selection'] == run['selection']]
-    if not versions:
-        st.caption('在下方生成设计方案，默认一次生成三版供比较。')
-        return
-    latest = versions[-1]
-    shown = [v for v in versions if latest.get('group_id') and v.get('group_id') == latest['group_id']] or versions[-3:]
-    for column, design in zip(st.columns(len(shown)), shown):
-        with column, st.container(border=True, key='custom-design-' + design['id']):
-            content = design['content']
-            label = f"方案 {design['variant']}" if design.get('variant') else f"设计版本 {design['version']}"
-            st.markdown(f"**{label} · {escape(content['title'])}**")
-            asset = next((a for a in run.get('image_assets', []) if a['design_id'] == design['id']), None)
-            if asset:
-                try:
-                    st.image(demand_images.asset_path(service, run['id'], asset['path']).read_bytes(), caption=asset['title'] + '（概念图稿）', width='stretch')
-                except (OSError, ValueError):
-                    st.caption('图稿文件不可读取。')
-            st.markdown(swatches(content['palette']), unsafe_allow_html=True)
-            st.caption(content['concept'][:90])
-            st.caption('核心应用：' + '、'.join(a['name'] for a in content['applications'] if a['priority'] == 'core'))
-            chosen = run.get('design_choice') == design['id']
-            if st.button('已确认' if chosen else '确认此方案', key='custom-choose-' + design['id'], disabled=busy or chosen,
-                         type='primary' if chosen else 'secondary', width='stretch'):
-                if action(engine, service.choose_design, run['id'], design['id'])[0]:
-                    st.rerun()
 
 
 def confirm_step(engine, run):

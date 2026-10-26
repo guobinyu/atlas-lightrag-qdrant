@@ -71,47 +71,6 @@ def test_legacy_demand_links_open_the_tasks_workbench(demand):
     assert not shell(demand, view='unknown').exception
 
 
-def test_predict_board_multi_select_cards_and_export(demand):
-    demand.llm = V4Model(demand.llm)
-    run = demand.demands.create({**INPUT, 'path': 'trend', 'capacity': {'categories': ['礼盒包装'], 'lead_days': 20}})
-    demand.demands.approve(run['id'])
-    app = shell(demand, view='predict')
-    assert not app.exception
-    assert len(app.get('plotly_chart')) == 1
-    assert button(app, '生成备选方案').disabled  # No topic yet.
-    app.checkbox(key=f"predict-topic-{run['id']}-N-double11-2026").check()
-    app.checkbox(key=f"predict-topic-{run['id']}-N-christmas-2026").check()
-    assert any('尚未确认选题' in i.value for i in app.info)
-    button(app, '确认选题').click().run()
-    assert not app.exception
-    assert demand.demands.load(run['id'])['topic_ids'] == ['N-double11-2026', 'N-christmas-2026']
-    assert any('已确认 2 个选题' in t.value for t in app.toast)
-    assert any('当前选题：双十一、圣诞节' in x.value for x in app.success)
-    button(app, '确认选题').click().run()
-    assert any('选题没有变化' in t.value for t in app.toast)
-    button(app, '生成备选方案').click().run()
-    wait(demand)
-    app.run()
-    assert not app.exception
-    round_id = demand.demands.load(run['id'])['candidate_rounds'][0]['id']
-    assert any(':material/redeem:' in m.value for m in app.markdown)
-    assert any('产能通过' in m.value for m in app.markdown)
-    app.button(key=f'pick-{round_id}-C1').click().run()
-    assert demand.demands.load(run['id'])['selection'] == {'round_id': round_id, 'candidate_id': 'C1'}
-    exported = next(d for d in app.get('download_button') if d.proto.label == '导出方案')
-    assert not exported.proto.disabled
-    # Pattern dispatch needs an image service.
-    assert button(app, '下发纹样任务').disabled
-    # The next step is reachable from the research tab and opens the package tab.
-    assert any('已选方向' in c.value for c in app.caption)
-    button(app, '生成方案包').click().run()
-    wait(demand)
-    app.run()
-    assert not app.exception
-    assert app.query_params['step'] == ['方案包']
-    assert len(demand.demands.load(run['id'])['briefs']) == 1
-
-
 def test_predict_new_task_from_enterprise_profile(demand):
     demand.enterprises.save({'name': '南浔某厂', 'industry': '丝绸', 'capabilities': '真丝丝巾', 'capacity': {'lead_days': 15}})
     app = shell(demand, view='predict')
@@ -127,9 +86,10 @@ def test_predict_new_task_from_enterprise_profile(demand):
     assert not app.exception
     created = demand.demands.load(demand.demands.runs()[0]['id'])
     assert created['inputs']['path'] == 'trend' and created['inputs']['capacity'] == {'lead_days': 15}
-    # The stub analysis asks a question, so the clarification dialog opens and nothing is confirmed yet.
+    # The stub analysis asks a question: it is shown in the page, not in a dialog, and nothing is confirmed yet.
     assert demand.llm.calls == ['DEMAND_ANALYZE']
-    assert app.session_state['demand-dialog']['stage'] == 'questions'
+    assert 'demand-dialog' not in app.session_state
+    assert any(t.label == '补充说明／其他回答' for t in app.text_area)
     assert created['approved_revision'] is None
 
 

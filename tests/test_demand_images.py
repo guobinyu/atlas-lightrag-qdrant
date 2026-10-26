@@ -146,7 +146,7 @@ def test_ui_generate_select_edit_history_and_application(images):
     run = designed(images)
     app = page(images)
     assert not app.exception
-    button(app, '补充生成三版设计图稿').click().run()
+    next(b for b in app.button if b.label in ('生成三版效果图', '再生成一批效果图（3 张）')).click().run()
     wait(images); app.run()
     assert not app.exception
     assert len([b for b in app.get('download_button') if b.label == '下载 PNG']) == 3
@@ -281,7 +281,7 @@ def test_new_text_version_and_changed_source_keep_image_history(images):
     images.demands.update(run['id'], {**INPUT, 'purpose': '其他用途'})
     app.run()
     assert not app.exception
-    assert button(app, '补充生成三版设计图稿').disabled
+    assert next(b for b in app.button if b.label in ('生成三版效果图', '再生成一批效果图（3 张）')).disabled
 
 
 @pytest.mark.parametrize('size', ['2048x2048', '2496x1664', '1664x2496'])
