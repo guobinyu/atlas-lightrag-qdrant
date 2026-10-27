@@ -10,7 +10,7 @@ from lab.graph import graph_figure, subgraph
 from lab.llm import LLMSettings
 from lab.sources import MAX_BYTES, parse_document, search_web
 
-PAGES = {"home": "首页", "predict": "爆款预测", "custom": "定制设计", "culture": "知识库", "pattern": "纹样设计", "campaign": "营销生成",
+PAGES = {"home": "首页", "predict": "爆款预测", "custom": "定制设计", "culture": "知识库", "pattern": "设计图稿", "campaign": "营销生成",
          "demand": "产品需求探索", "collect": "资料工作台", "graph": "知识图谱", "semantic": "标准语义图谱", "vectors": "向量数据库", "retrieve": "检索观察台", "settings": "系统设置"}
 STATUS = {"collected": "待构建", "pending": "等待处理", "indexing": "构建中", "processing": "处理中", "processed": "已入库", "failed": "失败", "interrupted": "中断", "preprocessed": "待完成"}
 EVENTS = {"job.started": "任务开始", "source.fetching": "读取网页正文", "source.collected": "资料已保存", "source.failed": "资料读取失败", "document.started": "文档切块与抽取", "llm.started": "调用抽取模型", "llm.completed": "模型返回", "llm.failed": "模型调用失败", "document.completed": "图谱与向量已写入", "document.failed": "文档构建失败", "indexes.refreshing": "读取最新索引", "build.completed": "构建完成", "collection.completed": "采集完成", "job.failed": "任务失败"}

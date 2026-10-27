@@ -16,7 +16,7 @@ from lab.enterprises import Enterprises
 from lab.flow_ui import NUMBERS, brief_content, current_round, direction_lines, last_op, latest_analysis
 from lab.ui_kit import badges, boundary
 
-STEPS = ['需求与产能', '选题', '候选方向', '方案包', '设计与纹样']
+STEPS = ['需求与产能', '选题', '候选方向', '方案包', '设计与效果图']
 PREFIX = 'predict'
 AWAIT = 'predict-await'
 # Changing step i makes results from this point on historical.
@@ -265,7 +265,7 @@ def auto_key(run):
 def start_pipeline(engine, run):
     st.session_state.pop(edit_key(run, 2), None)
     if st.session_state.get(auto_key(run)):
-        flash('已确定方向，正在自动生成方案包、设计方案和纹样初稿。')
+        flash('已确定方向，正在自动生成方案包、设计方案和效果图。')
         launch(engine, 'demand_pipeline', run['id'])
     else:
         flash('已确定方向。下一步：生成方案包。')
@@ -285,7 +285,7 @@ def direction_view(engine, run, busy, editing):
     else:
         round_topics_caption(batch)
         ready = work.llm.configured and work.images.configured
-        st.checkbox('确定方向后自动完成方案包、设计方案和纹样初稿', key=auto_key(run), disabled=busy or not ready,
+        st.checkbox('确定方向后自动完成方案包、设计方案和效果图', key=auto_key(run), disabled=busy or not ready,
                     help='默认不勾选。勾选后选定方向会依次生成第 ④、⑤ 步的结果，需要配置文字模型和图片服务。')
         if not work.images.configured:
             st.caption('自动完成需要先在系统设置中配置图片服务。')
@@ -324,13 +324,13 @@ def package_view(engine, run, brief, busy, editing, advance_key=None):
             launch(engine, 'demand_brief', run['id'])
         return
     brief_content(run, brief)
-    if advance_key and st.button('下一步：设计与纹样', type='primary', icon=':material/arrow_forward:', key=advance_key + '-button'):
+    if advance_key and st.button('下一步：设计与效果图', type='primary', icon=':material/arrow_forward:', key=advance_key + '-button'):
         st.session_state[advance_key] = True
         st.rerun()
     flow.brief_more(engine, run, brief, busy, editing, PREFIX, edit_key(run, 3))
 
 
-# ⑤ 设计与纹样
+# ⑤ 设计与效果图
 
 # Page
 
@@ -338,7 +338,7 @@ def predict_page(engine):
     from lab.workbench_ui import header
     work = engine.workbench
     busy = work.active is not None
-    header('爆款产品研判工作平台', '按「需求与产能 → 选题 → 候选方向 → 方案包 → 设计与纹样」五步推进，每一步确认后再进入下一步。', 'HOT PRODUCT PREDICTION')
+    header('爆款产品研判工作平台', '按「需求与产能 → 选题 → 候选方向 → 方案包 → 设计与效果图」五步推进，每一步确认后再进入下一步。', 'HOT PRODUCT PREDICTION')
     flow.show_flash(PREFIX)
     a, b = st.columns([4, 1], vertical_alignment='bottom')
     with a:

@@ -77,7 +77,7 @@ template_focus 存在时按其中的场景关注点设计候选，并在 assumpt
 summary.inputs.use_date 是使用或交付日期（如婚期、校庆日），用来倒排生产与设计交付，不是热点。
 topics 是用户选择的 1–3 个话题（topic 为其中第一个），可以组合成一个方向，也可以分别对应不同候选；topic_scores 是各话题的预测评分，不是热度。
 '''
-BRIEF_V4 = BRIEF_V3 + '''另需提供产品方案包 "package"：{"positioning":"产品定位","audience":"目标人群","story":"文化故事摘要","materials":"面料与工艺建议","patterns":[{"direction":"纹样方向","element_ref":"可选，M 开头素材"}],"ip":[{"name":"IP 名称","usage":"使用方式","rights":"授权情况或待确认事项","element_ref":"可选"}],"pricing":{"low":数字,"high":数字,"basis":"定价依据"},"risks":[{"item":"风险","level":"高、中或低","response":"应对措施"}],"specs":[{"item":"规格项目","value":"建议值","status":"确认、建议或待定"}]}。
+BRIEF_V4 = BRIEF_V3 + '''另需提供产品方案包 "package"：{"positioning":"产品定位","audience":"目标人群","story":"文化故事摘要","materials":"面料与工艺建议","patterns":[{"direction":"图案与视觉方向","element_ref":"可选，M 开头素材"}],"ip":[{"name":"IP 名称","usage":"使用方式","rights":"授权情况或待确认事项","element_ref":"可选"}],"pricing":{"low":数字,"high":数字,"basis":"定价依据"},"risks":[{"item":"风险","level":"高、中或低","response":"应对措施"}],"specs":[{"item":"规格项目","value":"建议值","status":"确认、建议或待定"}]}。
 summary.inputs.use_date 存在时，在 specs 和 risks 中说明按该日期倒排的打样、生产与交付节点。pricing 是参考单价（元），需要报价验证；用户提供 budget 单价时，区间必须与预算单价区间有重叠。specs 只有用户明确确认的条件可标为确认，其余标为建议或待定。risks 至少一项，选市场、生产、授权、交期中真正相关的风险。没有可用 IP 或授权不明时 ip 可为空数组，不得编造授权。patterns 至少一项。
 '''
 TEMPLATE_RULE = 'template_focus 是用户选择的场景模板关注点，只用于判断需要澄清什么和给出建议，不是用户已确认的条件。'
@@ -389,7 +389,7 @@ def check_package(value, inputs, evidence):
     texts(package, ('positioning', 'audience', 'story', 'materials'))
     patterns, ip, risks, specs = (package.get(k) for k in ('patterns', 'ip', 'risks', 'specs'))
     if not isinstance(patterns, list) or not patterns or not isinstance(ip, list) or not isinstance(specs, list):
-        raise ValueError('方案包需要纹样方向、IP 信息和规格表数组，纹样方向至少一项。')
+        raise ValueError('方案包需要图案方向、IP 信息和规格表数组，图案方向至少一项。')
     for item in patterns:
         texts(item, ('direction',))
     for item in ip:
@@ -464,7 +464,7 @@ def package_markdown(package):
     pricing = package['pricing']
     blocks = [f"**定位**：{package['positioning']}", f"**目标人群**：{package['audience']}",
               f"**文化故事**：{package['story']}", f"**面料与工艺**：{package['materials']}",
-              '**纹样方向**\n\n' + '\n'.join('- ' + p['direction'] + ref(p) for p in package['patterns']),
+              '**图案方向**\n\n' + '\n'.join('- ' + p['direction'] + ref(p) for p in package['patterns']),
               '**IP 信息**\n\n' + ('\n'.join(f"- {i['name']}：{i['usage']}；授权：{i['rights']}{ref(i)}" for i in package['ip']) or '- 暂无可用 IP'),
               f"**定价参考**：{pricing['low']}–{pricing['high']} 元／件。{pricing['basis']}（参考估算，需报价验证）",
               '**风险评估**\n\n' + '\n'.join(f"- [{r['level']}] {r['item']}：{r['response']}" for r in package['risks'])]
@@ -974,7 +974,7 @@ class DemandService:
             instruction = '\n'.join(x for x in (instruction.strip(), extra) if x)
         if kind == 'demand_pipeline':
             if not self.work.images.configured:
-                raise ValueError('请先在模型设置中配置图片服务，再下发纹样任务。')
+                raise ValueError('请先在模型设置中配置图片服务，再自动生成效果图。')
             self.work.images.settings.validate()
         if kind == 'demand_search':
             # Starting a new search makes previous results historical, without deleting them.
@@ -1008,14 +1008,14 @@ class DemandService:
         if kind == 'demand_analyze':
             op['analysis_format_version'] = ANALYSIS_FORMAT_VERSION
         if kind == 'demand_pipeline':
-            op.update(design_format_version=DESIGN_FORMAT_VERSION, include_images=True, image_mode='pattern',
+            op.update(design_format_version=DESIGN_FORMAT_VERSION, include_images=True, image_mode='application',
                       image_config=self.work.images.settings.public())
         if source_brief is not None and inputs.get('include_images', False):
             if not self.work.images.configured:
                 raise ValueError('请先配置图片服务，再生成包含图稿的设计方案。')
             self.work.images.settings.validate()
-            if inputs.get('image_mode', 'application') not in ('application', 'pattern'):
-                raise ValueError('图稿类型只能为应用效果图或纹样初稿。')
+            if inputs.get('image_mode', 'application') != 'application':
+                raise ValueError('图稿只支持应用效果图。')
             op['include_images'] = True
             op['image_mode'] = inputs.get('image_mode', 'application')
             op['image_config'] = self.work.images.settings.public()
@@ -1344,7 +1344,7 @@ class DemandService:
                     record['capacity_log'] = capacity_log
                 run['candidate_rounds'].append(record)
         elif kind == 'demand_pipeline':
-            # Brief → one design → three pattern drafts in one operation; each step is cached for retries.
+            # Brief → one design → three application drafts in one operation; each step is cached for retries.
             brief = await self._brief(run, op, job, format_version)
             if 'brief_snapshot' not in op:
                 op['brief_snapshot'] = deepcopy(brief)

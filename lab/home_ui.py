@@ -10,7 +10,7 @@ from lab.ui_kit import NAV, go, workbench_for
 ENTRIES = [('predict', '结合节日节点、热点与企业产能，研判并推荐细分产品方向。', '个研判任务'),
            ('custom', '面向婚礼、校服、校友纪念品等场景，对话式拆解需求并形成设计说明。', '个定制任务'),
            ('culture', '按主题、样本、素材三层解码文化资料，提供纹样、配色与叙事。', '个已发布素材'),
-           ('pattern', '汇总可平铺纹样初稿，查看、选用和下载。', '张纹样初稿'),
+           ('pattern', '汇总各任务的应用效果图，查看、选用和下载。', '张设计图稿'),
            ('campaign', '结合热点与知识库生成传播方案、图文与短视频脚本。', '个营销任务')]
 STATES = {'running': '执行中', 'success': '已完成', 'failed': '失败', 'interrupted': '已中断'}
 
@@ -25,12 +25,12 @@ def run_state(run):
 def home_page(engine):
     from lab.workbench_ui import header
     work = engine.workbench
-    header('从文化热点到可落地的设计', '结合企业产能研判爆款方向，按场景定制设计，生成纹样与营销素材。', 'SMART DESIGN · DIGITAL CULTURE')
+    header('从文化热点到可落地的设计', '结合企业产能研判爆款方向，按场景定制设计，生成设计图稿与营销素材。', 'SMART DESIGN · DIGITAL CULTURE')
     demands, campaigns, stats = work.demands.runs(), work.campaigns.runs(), work.culture.stats()
     counts = {'predict': sum(r['inputs']['path'] == 'trend' for r in demands),
               'custom': sum(r['inputs']['path'] == 'custom' for r in demands),
               'culture': stats['elements'],
-              'pattern': sum(a.get('mode') == 'pattern' for r in demands for a in r.get('image_assets', [])),
+              'pattern': sum(len(r.get('image_assets', [])) for r in demands),
               'campaign': len(campaigns)}
     for column, (view, copy, unit) in zip(st.columns(len(ENTRIES)), ENTRIES):
         with column, st.container(border=True, key='home-entry-' + view):

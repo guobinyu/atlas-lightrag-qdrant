@@ -76,8 +76,8 @@ def prepare(service, run, kind, inputs, instruction):
         mode = inputs.get('mode', 'application')
         application_index = inputs.get('application_index', 0)
         size = inputs.get('size', image_sizes(provider)[0])
-    if mode not in ('application', 'pattern'):
-        raise ValueError('图稿类型只能为应用效果图或纹样初稿。')
+    if mode != 'application':
+        raise ValueError('纹样初稿已停用，请为设计项生成应用效果图。')
     design = next((d for d in run.get('design_versions', []) if d['id'] == design_id), None)
     if not design or stale(run, design) or design['selection'] != run['selection']:
         raise ValueError('请选择当前条件及产品方向下的文字设计方案。')

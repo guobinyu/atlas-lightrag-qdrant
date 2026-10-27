@@ -164,6 +164,6 @@ def test_auto_option_runs_package_design_and_patterns(images):
     assert not app.exception
     run = images.demands.load(run['id'])
     assert len(run['briefs']) == 1 and len(run['design_versions']) == 1
-    assert [a['mode'] for a in run['image_assets']] == ['pattern'] * 3
+    assert [a['mode'] for a in run['image_assets']] == ['application'] * 3
     assert all(flow_state(run)[0])
     assert run['briefs'][0]['binding'] == binding(run)

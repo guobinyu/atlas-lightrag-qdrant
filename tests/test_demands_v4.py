@@ -1,4 +1,4 @@
-"""Capacity-checked candidates, product package, ranked topics, element changes, design variants and pattern drafts."""
+"""Capacity-checked candidates, product package, ranked topics, element changes, design variants and retired pattern drafts."""
 from copy import deepcopy
 from io import BytesIO
 import json
@@ -224,27 +224,22 @@ def test_three_design_variants_are_one_text_only_group(v4):
         start(v4, run, 'design_revise', design_id=group[0]['id'], instruction='改', variants=3)
 
 
-def test_pattern_drafts_save_select_and_export(images):
+def test_pattern_drafts_are_retired_but_old_ones_stay_readable(images):
     images.llm = V4Model(images.llm)
     run = briefed(images)
-    run, status = start(images, run, 'design_generate', brief_id=run['briefs'][0]['id'], include_images=True, image_mode='pattern')
-    assert status['status'] == 'success'
-    assets = run['image_assets']
-    assert len(assets) == 3 and {a['mode'] for a in assets} == {'pattern'}
-    assert assets[0]['application_index'] == -1 and assets[0]['size'] == '1024x1024'
-    data = images.llm.inputs[-1]
-    assert data['pattern_directions'] == [{'direction': '校园剪影线描'}] and data['palette']
-    assert '四方连续' in images.image_calls[0]['prompt']
+    with pytest.raises(ValueError, match='只支持应用效果图'):
+        start(images, run, 'design_generate', brief_id=run['briefs'][0]['id'], include_images=True, image_mode='pattern')
+    run, status = start(images, images.demands.load(run['id']), 'design_generate', brief_id=run['briefs'][0]['id'], include_images=True)
+    assert status['status'] == 'success' and {a['mode'] for a in run['image_assets']} == {'application'}
     design = run['design_versions'][0]
-    demand_images.select(images.demands, run['id'], assets[1]['id'])
-    run = images.demands.load(run['id'])
-    assert run['image_selections'] == {design['id'] + ':pattern': assets[1]['id']}
-    run, status = start(images, run, 'image_revise', image_id=assets[1]['id'], instruction='减少留白')
-    assert status['status'] == 'success' and run['image_assets'][-1]['mode'] == 'pattern'
-    run, status = start(images, run, 'image_generate', design_id=design['id'], application_index=0)
-    assert status['status'] == 'success'
+    with pytest.raises(ValueError, match='纹样初稿已停用'):
+        start(images, run, 'image_generate', design_id=design['id'], mode='pattern')
+    # A pattern draft saved before the change is still exported.
+    legacy = {**run['image_assets'][0], 'id': design['id'] + '-legacy', 'mode': 'pattern', 'application_index': -1,
+              'application_name': '纹样初稿', 'title': '旧纹样'}
+    run['image_assets'].append(legacy)
     text = '\n'.join(p.extract_text() for p in PdfReader(BytesIO(export_pdf(images.demands, run, design))).pages)
-    assert text.index('设计图稿') < text.index('纹样初稿') and '已选用' in text
+    assert text.index('设计图稿') < text.index('纹样初稿')
 
 
 def test_ui_template_capacity_topics_and_variants(v4):

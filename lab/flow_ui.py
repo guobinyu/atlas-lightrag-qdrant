@@ -11,7 +11,7 @@ from lab.ui_kit import category_icon
 
 NUMBERS = '①②③④⑤'
 STATE_LABELS = {'done': '已完成', 'current': '进行中', 'auto': '自动生成中', 'locked': '待完成'}
-IMAGE_MODES = {'pattern': '纹样初稿（可平铺单元）', 'application': '应用效果图', 'none': '仅文字方案'}
+IMAGE_MODES = {'application': '应用效果图', 'none': '仅文字方案'}
 DESIGN_KINDS = ('demand_design_generate', 'demand_design_revise', 'demand_pipeline')
 # Changing a step makes everything from this point on historical.
 IMPACT_ORDER = ('rounds', 'selection', 'brief', 'designs')
@@ -154,12 +154,12 @@ def generate_options(engine, run, brief, busy, label, prefix, default_variants=1
         mode = st.radio('图稿', list(IMAGE_MODES), format_func=IMAGE_MODES.get, key=key + 'mode', horizontal=True,
                         disabled=busy or variants == 3 or not work.images.configured)
     if variants == 3:
-        st.caption('一次生成 3 版文字方案供比较，选定一版后再生成纹样初稿或效果图。')
+        st.caption('一次生成 3 版文字方案供比较，选定一版后再生成效果图。')
     elif not work.images.configured:
         st.caption('尚未配置图片服务，本次只生成文字方案。')
     with_images = work.images.configured and variants == 1 and mode != 'none'
     if label is None:
-        label = '生成三版设计方案' if variants == 3 else '生成设计与纹样' if with_images else '生成设计方案'
+        label = '生成三版设计方案' if variants == 3 else '生成设计与效果图' if with_images else '生成设计方案'
     if st.button(label, type='primary', icon=':material/auto_awesome:', disabled=busy or not work.llm.configured, key=key + 'generate'):
         inputs = {'brief_id': brief['id'], 'variants': variants, 'include_images': with_images}
         if with_images:
@@ -179,7 +179,7 @@ def design_view(engine, run, brief, design, busy, prefix, default_variants=1, ne
         versions = [v for v in run.get('design_versions', []) if v['brief_id'] == brief['id'] and not stale(run, v)]
         if versions and versions[-1].get('group_id'):
             design_cards(engine, run, brief, busy, prefix=prefix, heading='选择一版设计方案')
-            st.caption('确认一版后，在这一步继续生成纹样初稿或效果图。')
+            st.caption('确认一版后，在这一步继续生成效果图。')
         else:
             st.caption('依据：' + '；'.join(brief_lines(brief)))
             generate_options(engine, run, brief, busy, new_label, prefix, default_variants)
@@ -201,9 +201,8 @@ def design_view(engine, run, brief, design, busy, prefix, default_variants=1, ne
             changes = element_widgets({k: v for k, v in brief['evidence'].items() if 'element_id' in v}, key + 'elements', busy)
             revise = st.form_submit_button('生成设计方案新版本', disabled=busy or not work.llm.configured)
         if revise:
-            saved = {a.get('mode', 'application') for a in run.get('image_assets', []) if a['design_id'] == design['id']}
             launch(engine, 'demand_design_revise', run['id'], design_id=design['id'], instruction=instruction, element_changes=changes,
-                   include_images=work.images.configured, image_mode='pattern' if 'pattern' in saved or not saved else 'application')
+                   include_images=work.images.configured)
         pdf_run, pdf_design = deepcopy(run), deepcopy(design)
         a, b, c = st.columns(3)
         a.download_button('导出 PDF', lambda: export_pdf(work.demands, pdf_run, pdf_design), file_name=f"design-{run['id'][:8]}-v{design['version']}.pdf",

@@ -108,9 +108,9 @@ def test_pipeline_runs_brief_design_and_patterns_and_retries_only_failed_step(im
     images.images.render = original
     run, status = start(images, run, 'retry', operation_id=list(run['operations'])[-1])
     assert status['status'] == 'success'
-    assert images.llm.calls == calls  # Brief, design and pattern prompts were cached.
+    assert images.llm.calls == calls  # Brief, design and image prompts were cached.
     assert len(run['briefs']) == 1 and len(run['design_versions']) == 1
-    assert [a['mode'] for a in run['image_assets']] == ['pattern'] * 3
+    assert [a['mode'] for a in run['image_assets']] == ['application'] * 3
     assert run['design_versions'][0]['brief_id'] == run['briefs'][0]['id']
 
 

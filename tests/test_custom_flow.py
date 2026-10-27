@@ -57,6 +57,7 @@ def test_page_walks_all_four_steps_without_search(demand):
     app.button(key='custom-pick-alumni').click().run()
     next(t for t in app.text_input if t.label == '行业（必填）').input('丝绸')
     next(t for t in app.text_area if t.label == '生产能力（必填）').input('真丝丝巾与礼盒')
+    app.run()  # Fields commit on blur in the browser, which enables the chat input.
     app.chat_input(key='custom-chat-input').set_value('我要做校友纪念类产品').run()
     wait(demand)
     app.run()
@@ -129,3 +130,63 @@ def test_edit_lists_impact_before_anything_changes(demand):
     app = shell(demand, view='custom', demand=run['id'], step='产品方向')
     assert any(b.label == '已选为方向' for b in app.button)
     assert not app.warning
+
+
+def fill_merchant(app):
+    app.text_input(key='custom-new-None-industry').input('丝绸')
+    app.text_area(key='custom-new-None-capabilities').input('真丝丝巾与礼盒')
+    app.run()
+
+
+def test_template_starts_a_task_without_a_request(demand):
+    app = shell(demand, view='custom')
+    start_button = app.button(key='custom-start-template')
+    assert start_button.disabled
+    assert any('请先在上方选择一个场景模板' in c.value for c in app.caption)
+    app.button(key='custom-pick-alumni').click().run()
+    assert app.button(key='custom-start-template').disabled
+    assert any('请先填写行业和生产能力' in c.value for c in app.caption)
+    fill_merchant(app)
+    assert not app.button(key='custom-start-template').disabled
+    assert app.button(key='custom-start-template').label == '用「校友纪念品」模板开始'
+    app.button(key='custom-start-template').click().run()
+    wait(demand)
+    app.run()
+    assert not app.exception
+    run = demand.demands.runs()[0]
+    assert run['inputs']['request'] == '定制校友纪念品'
+    assert run['inputs']['template'] == 'alumni' and run['inputs']['audience'] == '返校校友'
+    assert demand.llm.calls == ['DEMAND_ANALYZE']
+
+
+def test_template_start_uses_the_optional_note(demand):
+    app = shell(demand, view='custom')
+    app.button(key='custom-pick-wedding').click().run()
+    fill_merchant(app)
+    app.text_area(key='custom-start-note').input('婚礼回礼丝巾，200 份').run()
+    app.button(key='custom-start-template').click().run()
+    wait(demand)
+    run = demand.demands.runs()[0]
+    assert run['inputs']['request'] == '婚礼回礼丝巾，200 份' and run['inputs']['template'] == 'wedding'
+
+
+def test_switching_template_asks_first_and_lists_impact(demand):
+    demand.llm = V4Model(demand.llm)
+    run = demand.demands.create({**INPUT, 'template': 'alumni'})
+    demand.demands.approve(run['id'])
+    run, _ = start(demand, demand.demands.load(run['id']), 'candidates')
+    run = demand.demands.load(run['id'])
+    app = shell(demand, view='custom', demand=run['id'], step='需求对话')
+    app.button(key=f"custom-switch-{run['id']}-wedding").click().run()
+    assert not app.exception
+    assert any('1 轮候选' in w.value for w in app.warning)
+    assert demand.demands.load(run['id']) == run  # Nothing changes before confirming.
+    app.button(key=f"custom-switch-cancel-{run['id']}").click().run()
+    assert demand.demands.load(run['id']) == run
+    app.button(key=f"custom-switch-{run['id']}-wedding").click().run()
+    app.button(key=f"custom-switch-confirm-{run['id']}").click().run()
+    assert not app.exception
+    updated = demand.demands.load(run['id'])
+    assert updated['inputs']['template'] == 'wedding' and updated['revision'] == run['revision'] + 1
+    # Fields the user already had are kept; the requirement must be confirmed again.
+    assert updated['inputs']['audience'] == INPUT['audience'] and updated['approved_revision'] is None

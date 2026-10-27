@@ -42,6 +42,10 @@ def pick_template(key):
     st.session_state['custom-template'] = None if current == key else key
 
 
+def pending_key(run):
+    return f"custom-switch-pending-{run['id']}"
+
+
 def switch_template(engine, run, key):
     """Existing task: record the template and prefill only empty fields; this creates a new requirement version."""
     inputs = {**run['inputs'], 'template': key}
@@ -49,6 +53,23 @@ def switch_template(engine, run, key):
         inputs[field] = inputs.get(field) or TEMPLATES[key][field]
     ok, _ = action(engine, engine.workbench.demands.update, run['id'], inputs, run['summaries'][-1]['answers'])
     if ok:
+        st.session_state.pop(pending_key(run), None)
+        flow.flash(PREFIX, f"已切换为「{TEMPLATES[key]['label']}」模板，请重新确认需求。")
+        st.rerun()
+
+
+def confirm_switch(engine, run, busy):
+    key = st.session_state.get(pending_key(run))
+    if not key:
+        return
+    st.markdown(f"**切换为「{TEMPLATES[key]['label']}」模板？**")
+    st.caption('只补充尚未填写的人群、场景、用途和主题；切换后需要重新确认需求。')
+    flow.impact(run, 'rounds', '设计说明')
+    a, b = st.columns(2)
+    if a.button('确认切换', type='primary', key=f"custom-switch-confirm-{run['id']}", disabled=busy, width='stretch'):
+        switch_template(engine, run, key)
+    if b.button('取消', key=f"custom-switch-cancel-{run['id']}", width='stretch'):
+        st.session_state.pop(pending_key(run), None)
         st.rerun()
 
 
@@ -68,9 +89,12 @@ def template_panel(engine, run, busy):
                               type='primary' if chosen else 'secondary', width='stretch')
                 elif st.button(label, key=f"custom-switch-{run['id']}-{key}", disabled=busy or chosen,
                                type='primary' if chosen else 'secondary', width='stretch'):
-                    switch_template(engine, run, key)
+                    st.session_state[pending_key(run)] = key
+                    st.rerun()
     if current:
         st.caption('关注点：' + TEMPLATES[current]['focus'])
+    if run:
+        confirm_switch(engine, run, busy)
 
 
 def merchant_panel(engine, run, busy):
@@ -112,13 +136,36 @@ def transcript(run):
     return items
 
 
+def missing_reason(engine, merchant, template_needed=False):
+    """Why a new task cannot be started yet; shown next to the disabled control instead of after submitting."""
+    if not engine.workbench.llm.configured:
+        return '需要先在系统设置中配置文字模型。'
+    if template_needed and not st.session_state.get('custom-template'):
+        return '请先在上方选择一个场景模板。'
+    missing = [label for field, label in (('industry', '行业'), ('capabilities', '生产能力')) if not (merchant or {}).get(field, '').strip()]
+    return f"请先填写{'和'.join(missing)}。" if missing else ''
+
+
+def start_panel(engine, merchant, busy):
+    template = st.session_state.get('custom-template')
+    panel_title('开始定制')
+    note = st.text_area('需求说明（选填）', max_chars=4000, key='custom-start-note', disabled=busy, height=80,
+                        placeholder='例如：给 2006 届校友做 30 周年返校纪念，预算中档。不填也可以，模型会通过对话追问。')
+    reason = missing_reason(engine, merchant, template_needed=True)
+    label = f"用「{TEMPLATES[template]['label']}」模板开始" if template else '用模板开始'
+    if st.button(label, type='primary', icon=':material/play_arrow:', key='custom-start-template', disabled=busy or bool(reason), width='stretch'):
+        create_from_chat(engine, note.strip() or f"定制{TEMPLATES[template]['label']}", merchant)
+    st.caption(reason or '创建后模型会分析需求，有不清楚的地方在对话中追问。也可以不选模板，直接在对话框描述需求。')
+
+
 def create_from_chat(engine, text, merchant):
     template = st.session_state.get('custom-template') or ''
     prefill = {k: TEMPLATES[template][k] for k in TEMPLATE_FIELDS} if template else {}
     inputs = {'request': text, **merchant, **prefill, 'template': template, 'path': 'custom', 'days': 7}
     ok, run = action(engine, engine.workbench.demands.create, inputs)
     if ok:
-        st.session_state.update({'custom-new': False, 'custom-task': run['id'], 'custom-task-url': run['id']})
+        st.session_state.update({'custom-new': False, 'custom-task-url': run['id']})
+        st.session_state.pop('custom-start-note', None)
         st.query_params['demand'] = run['id']
         launch(engine, 'demand_analyze', run['id'])
 
@@ -186,9 +233,10 @@ def chat_panel(engine, run, merchant, busy):
                     st.write('请检查右侧的需求结构化预览，采用合适的建议后确认需求；也可以继续补充说明。')
             step_feedback(engine, run['id'], last_op(run), ('demand_analyze',), 'custom-chat')
     placeholder = '回答当前问题或补充说明' if session else '描述需求或补充说明'
-    message = st.chat_input(placeholder, key='custom-chat-input', max_chars=4000, disabled=busy or not configured)
-    if not configured:
-        st.caption('对话分析需要先在系统设置中配置文字模型。')
+    reason = missing_reason(engine, merchant) if run is None else ('' if configured else '对话分析需要先在系统设置中配置文字模型。')
+    message = st.chat_input(placeholder, key='custom-chat-input', max_chars=4000, disabled=busy or bool(reason))
+    if reason:
+        st.caption(reason)
     if message and message.strip():
         if run is None:
             create_from_chat(engine, message.strip(), merchant)
@@ -226,6 +274,8 @@ def need_step(engine, run, busy, editing=False):
     with left, st.container(border=True, key='custom-templates'):
         template_panel(engine, run, busy)
         merchant = merchant_panel(engine, run, busy)
+        if run is None:
+            start_panel(engine, merchant, busy)
     with middle, st.container(border=True, key='custom-chat'):
         chat_panel(engine, run, merchant, busy)
     with right, st.container(border=True, key='custom-preview'):
@@ -359,7 +409,7 @@ def custom_page(engine):
     run = None
     with a:
         if new:
-            st.markdown('**新建定制任务**：选好场景模板、填写企业信息，在对话框发送第一条需求即可创建。')
+            st.markdown('**新建定制任务**：选场景模板并填写企业信息后点「用模板开始」，或直接在对话框描述需求。')
         else:
             run = task_select(engine, 'custom', '定制任务')
     if new and has_runs:
@@ -375,7 +425,7 @@ def custom_page(engine):
     if run is None:
         flow.flow_bar(STEPS, ['current', 'locked', 'locked', 'locked'], '定制流程')
         with st.container(border=True, key='flow-step-0'):
-            flow.step_title(STEPS, 0, 'current', '发送第一条需求即可创建任务')
+            flow.step_title(STEPS, 0, 'current', '用模板开始或在对话框描述需求')
             need_step(engine, None, busy)
         for i in range(1, len(STEPS)):
             with st.container(border=True, key=f'flow-step-{i}'):

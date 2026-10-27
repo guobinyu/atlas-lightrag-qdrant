@@ -401,7 +401,7 @@ OP_TARGETS = {
     'demand_image_revise': ('demand-images', '图稿修改'),
     'demand_design_generate': ('demand-design', '设计方案与图稿'),
     'demand_design_revise': ('demand-design', '设计方案修订'),
-    'demand_pipeline': ('demand-design', '纹样任务'),
+    'demand_pipeline': ('demand-design', '自动生成效果图'),
 }
 
 
@@ -916,9 +916,6 @@ def design_step(engine, run, source_brief, op, heading='5 · 设计方案', defa
         st.caption('三版方案在概念、构图或配色上相互区分，只生成文字；选定一版后再生成图稿。')
     if st.button('生成设计方案', type='primary', disabled=busy or not work.llm.configured or not valid_source):
         launch(engine, 'demand_design_generate', identifier, brief_id=source_brief['id'], include_images=work.images.configured and variants == 1, variants=variants)
-    if st.button('一键生成设计方案与纹样初稿', disabled=busy or not work.llm.configured or not valid_source or not work.images.configured or variants != 1,
-                 help='生成一版文字方案后，按配色、故事映射和方案包中的纹样方向生成三个可平铺纹样单元。'):
-        launch(engine, 'demand_design_generate', identifier, brief_id=source_brief['id'], include_images=True, image_mode='pattern')
     step_feedback(engine, identifier, op, demand_design.KINDS, 'design')
     versions = list(reversed(run.get('design_versions', [])))
     if not versions:
@@ -999,37 +996,36 @@ def image_step(engine, run, design, valid_source, op):
         st.link_button('配置图片模型', '/?view=settings')
     apps = design['content']['applications']
     prefix = f"demand-image-{run['id']}-{design['id']}-"
-    saved = {a.get('mode', 'application') for a in run.get('image_assets', []) if a['design_id'] == design['id']}
-    # A pattern task saves only pattern drafts; open them instead of an empty application view.
-    mode = st.radio('图稿类型', ['application', 'pattern'], format_func=lambda m: '应用效果图' if m == 'application' else '纹样初稿（可平铺单元）',
-                    index=1 if saved == {'pattern'} else 0, horizontal=True, key=prefix + 'mode')
-    if mode == 'pattern':
-        index = 'pattern'
-        st.caption('按方案配色、故事映射和方案包中的纹样方向生成三个方形纹样单元，供图案设计参考；未经接缝与分色检查。')
-        has_patterns = any(a['design_id'] == design['id'] and a.get('mode') == 'pattern' for a in run.get('image_assets', []))
-        # Each click starts a new batch; earlier batches stay in the history below.
-        if st.button('再生成一批纹样初稿（3 张）' if has_patterns else '生成三版纹样初稿', key=prefix + 'pattern-generate',
-                     type='secondary' if has_patterns else 'primary', disabled=not enabled or not work.llm.configured):
-            launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], mode='pattern')
-    else:
-        index = st.selectbox('图稿设计项', list(range(len(apps))),
-            index=next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0),
-            format_func=lambda i: apps[i]['name'] + ('（核心）' if apps[i]['priority'] == 'core' else '（可选）'), key=prefix + 'app')
-        sizes = image_sizes(work.images.settings.provider)
-        labels = dict(zip(sizes, ('方形', '横向', '纵向')))
-        size = st.selectbox('图稿像素规格', sizes, format_func=lambda s: labels[s] + ' · ' + s.replace('x', '×'), key=prefix + work.images.settings.provider + '-size')
-        has_drafts = any(a['design_id'] == design['id'] and a.get('mode', 'application') == 'application' and a['application_index'] == index
-                         for a in run.get('image_assets', []))
-        if st.button('再生成一批效果图（3 张）' if has_drafts else '生成三版效果图', key=prefix + 'generate',
-                     type='secondary' if has_drafts else 'primary', disabled=not enabled or not work.llm.configured):
-            launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], application_index=index, size=size)
+    index = st.selectbox('图稿设计项', list(range(len(apps))),
+        index=next((i for i, a in enumerate(apps) if a['priority'] == 'core'), 0),
+        format_func=lambda i: apps[i]['name'] + ('（核心）' if apps[i]['priority'] == 'core' else '（可选）'), key=prefix + 'app')
+    sizes = image_sizes(work.images.settings.provider)
+    labels = dict(zip(sizes, ('方形', '横向', '纵向')))
+    size = st.selectbox('图稿像素规格', sizes, format_func=lambda s: labels[s] + ' · ' + s.replace('x', '×'), key=prefix + work.images.settings.provider + '-size')
+    has_drafts = any(a['design_id'] == design['id'] and a.get('mode', 'application') == 'application' and a['application_index'] == index
+                     for a in run.get('image_assets', []))
+    if st.button('再生成一批效果图（3 张）' if has_drafts else '生成三版效果图', key=prefix + 'generate',
+                 type='secondary' if has_drafts else 'primary', disabled=not enabled or not work.llm.configured):
+        launch(engine, 'demand_image_generate', run['id'], design_id=design['id'], application_index=index, size=size)
+    legacy = [a for a in run.get('image_assets', []) if a['design_id'] == design['id'] and a.get('mode') == 'pattern']
+    if legacy:
+        with st.expander(f'历史纹样初稿 · {len(legacy)} 张（已停用，只可查看和下载）'):
+            for column, asset in zip(st.columns(3), legacy[-3:]):
+                with column:
+                    try:
+                        raw = demand_images.asset_path(work.demands, run['id'], asset['path']).read_bytes()
+                    except (OSError, ValueError):
+                        st.caption('图片文件不可读取。')
+                        continue
+                    st.image(raw, caption='纹样初稿 · ' + asset['title'], width='stretch')
+                    st.download_button('下载 PNG', raw, file_name=f"pattern-{asset['id']}.png", mime='image/png', key=asset['id'] + '-legacy')
     step_feedback(engine, run['id'], op, demand_images.KINDS, 'images')
     if op and op['kind'] in demand_images.KINDS and op['status'] in ('failed', 'interrupted'):
         st.caption('点「重试失败阶段」只补生成未完成的图稿；服务端已生成但尚未保存时中断，重试可能再次调用并计费。')
     else:
         st.caption('每次点击都会新生成一批 3 张，不覆盖已有图稿；之前的批次可在下方「图稿批次与修订历史」中切换查看。')
     assets = [a for a in run.get('image_assets', []) if a['design_id'] == design['id'] and
-              (a.get('mode') == 'pattern' if mode == 'pattern' else a.get('mode', 'application') == 'application' and a['application_index'] == index)]
+              a.get('mode', 'application') == 'application' and a['application_index'] == index]
     if not assets:
         return
     groups = list(dict.fromkeys(a['operation_id'] for a in reversed(assets)))

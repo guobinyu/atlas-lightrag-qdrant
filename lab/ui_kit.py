@@ -5,7 +5,7 @@ import streamlit as st
 
 BRAND = '智能设计平台'
 NAV = {'home': ('首页', 'home'), 'predict': ('爆款预测', 'trending_up'), 'custom': ('定制设计', 'design_services'),
-       'culture': ('知识库', 'menu_book'), 'pattern': ('纹样设计', 'texture'), 'campaign': ('营销生成', 'campaign')}
+       'culture': ('知识库', 'menu_book'), 'pattern': ('设计图稿', 'photo_library'), 'campaign': ('营销生成', 'campaign')}
 SYSTEM = {'collect': '资料工作台', 'graph': '知识图谱', 'semantic': '标准语义图谱', 'vectors': '向量数据库',
           'retrieve': '检索观察台', 'settings': '模型、企业与日历设置'}
 # One wording per boundary. Details live in each page's 「依据与边界」 note, not repeated per item.

@@ -38,7 +38,7 @@ def test_home_is_default_with_entries_recent_tasks_and_calendar(demand):
     app = shell(demand)
     assert not app.exception
     assert app.segmented_control(key='top-nav').value == 'home'
-    for label in ('进入爆款预测', '进入定制设计', '进入知识库', '进入纹样设计', '进入营销生成'):
+    for label in ('进入爆款预测', '进入定制设计', '进入知识库', '进入设计图稿', '进入营销生成'):
         assert any(b.label == label for b in app.button)
     assert any('双十一' in m.value for m in app.markdown)
     app.button(key='home-open-' + run['id']).click().run()
@@ -123,6 +123,7 @@ def test_custom_chat_creates_task_answers_and_confirms(demand):
     app.button(key='custom-pick-alumni').click().run()
     next(t for t in app.text_input if t.label == '行业（必填）').input('丝绸')
     next(t for t in app.text_area if t.label == '生产能力（必填）').input('真丝丝巾与礼盒')
+    app.run()  # Fields commit on blur in the browser, which enables the chat input.
     app.chat_input(key='custom-chat-input').set_value('我要做校友纪念类产品').run()
     wait(demand)
     app.run()
@@ -147,7 +148,7 @@ def test_custom_chat_creates_task_answers_and_confirms(demand):
 def test_pattern_page_empty_state_and_enterprise_settings(demand):
     app = shell(demand, view='pattern')
     assert not app.exception
-    assert any('还没有纹样初稿' in i.value for i in app.info)
+    assert any('还没有设计图稿' in i.value for i in app.info)
     # The shared fixture engine has no embedding settings, so render the enterprise tab on its own.
     app = AppTest.from_string('''
 import streamlit as st
