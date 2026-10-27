@@ -62,7 +62,7 @@ def test_adoption_is_explicit_bound_and_reaches_context_and_export(demand):
     run, status = start(demand, run, 'brief')
     assert status['status'] == 'success'
     assert export_bundle(run, run['briefs'][0])['brief']['summary']['inputs']['purpose'] == '重逢纪念赠礼'
-    assert 'DEMAND_SEARCH' in demand.llm.calls
+    assert 'DEMAND_SEARCH' not in demand.llm.calls
 
 
 def test_unadopted_suggestions_never_become_inputs(demand):

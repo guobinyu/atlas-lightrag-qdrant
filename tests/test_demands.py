@@ -114,15 +114,18 @@ def selected(work):
     return work.demands.load(run['id'])
 
 
-def test_custom_searches_hotspots_and_preserves_user_facts(demand):
+def test_custom_uses_conversation_without_topic_search(demand):
     run = candidates(demand)
     assert run['inputs'] == INPUT
     assert run['inputs']['brand'] == ''
-    assert run['candidate_rounds'][0]['context']['knowledge_missing']
+    context = run['candidate_rounds'][0]['context']
+    assert context['knowledge_missing']
     assert len(run['candidate_rounds'][0]['candidates']) == 3
-    assert demand.llm.calls == ['DEMAND_SEARCH', 'DEMAND_EXTRACT', 'DEMAND_GROUP', 'DEMAND_CANDIDATES']
-    assert run['candidate_rounds'][0]['context']['topic']
-    assert 'S1' in run['candidate_rounds'][0]['context']['evidence']
+    # Custom design relies on the conversation, template and culture library; no hotspot search.
+    assert demand.llm.calls == ['DEMAND_CANDIDATES']
+    assert context['topic'] is None and not context.get('topics')
+    assert not any(k.startswith('S') for k in context['evidence'])
+    assert run['research'] == [] and run['topic_ids'] == []
 
 
 def test_clarify_answers_and_explicit_continue(demand):
@@ -426,8 +429,12 @@ def test_clarification_five_round_limit_and_final_retry(demand):
     assert service.load(run['id'])['approved_revision'] == current['revision']
 
 
-def test_custom_selected_topic_is_used_without_duplicate_search(demand):
-    run = demand.demands.create(INPUT)
+def test_custom_rejects_search_and_trend_uses_selected_topic(demand):
+    custom = demand.demands.create(INPUT)
+    demand.demands.approve(custom['id'])
+    with pytest.raises(ValueError, match='不使用热点搜索'):
+        start(demand, custom, 'search')
+    run = demand.demands.create({**INPUT, 'path': 'trend'})
     demand.demands.approve(run['id'])
     run, status = start(demand, run, 'search')
     assert status['status'] == 'success'
@@ -437,14 +444,35 @@ def test_custom_selected_topic_is_used_without_duplicate_search(demand):
     assert status['status'] == 'success'
     assert demand.llm.calls.count('DEMAND_SEARCH') == 1
     assert run['candidate_rounds'][0]['context']['topic']['id'] == topic['id']
-    assert run['inputs'] == INPUT
 
 
-def test_custom_empty_search_stops_candidates(demand, monkeypatch):
-    monkeypatch.setattr('lab.demands.search_web', lambda *a: [])
-    run = demand.demands.create(INPUT)
+def test_empty_search_fails_trend_but_custom_never_searches(demand, monkeypatch):
+    calls = []
+    def empty(*args):
+        calls.append(args)
+        return []
+    monkeypatch.setattr('lab.demands.search_web', empty)
+    run = demand.demands.create({**INPUT, 'path': 'trend'})
     demand.demands.approve(run['id'])
-    run, status = start(demand, run, 'candidates')
+    run, status = start(demand, run, 'search')
     assert status['status'] == 'failed'
-    assert not run['candidate_rounds']
-    assert 'DEMAND_CANDIDATES' not in demand.llm.calls
+    assert not run['research_id'] and not run['candidate_rounds']
+    searched = len(calls)
+    assert searched
+    custom = demand.demands.create(INPUT)
+    demand.demands.approve(custom['id'])
+    custom, status = start(demand, custom, 'candidates')
+    assert status['status'] == 'success' and len(calls) == searched
+
+
+def test_legacy_custom_topic_is_ignored_for_new_candidates(demand):
+    run = demand.demands.create(INPUT)
+    run['topic_id'], run['topic_ids'] = 'U1', ['U1']
+    run['manual_topics'] = [{'id': 'U1', 'kind': 'manual', 'title': '旧话题', 'fit': '旧', 'url': '', 'date': '',
+                             'date_status': 'manual', 'heat': '热度未验证', 'at': NOW}]
+    demand.demands.save(run)
+    demand.demands.approve(run['id'])
+    run, status = start(demand, demand.demands.load(run['id']), 'candidates')
+    assert status['status'] == 'success'
+    context = run['candidate_rounds'][0]['context']
+    assert context['topic'] is None and 'U1' not in context['evidence']

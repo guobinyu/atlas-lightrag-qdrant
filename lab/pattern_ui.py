@@ -9,7 +9,7 @@ from lab.demands import stale
 from lab.ui_kit import NAV, badges, boundary, go, workbench_for
 
 STATES = {'running': '执行中', 'success': '已完成', 'failed': '失败', 'interrupted': '已中断'}
-RETURN_STEP = {'predict': '设计与纹样', 'custom': '方案确认'}
+RETURN_STEP = {'predict': '设计与纹样', 'custom': '设计方案'}
 
 
 def pattern_page(engine):

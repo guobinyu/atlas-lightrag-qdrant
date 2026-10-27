@@ -1,6 +1,4 @@
-"""Selectable capacity options, scenario templates and style presets. Prefills are drafts, never confirmed facts."""
-CATEGORIES = ['丝巾', '围巾', '领带', '家居服', '旗袍', '校服', '抱枕', '团扇', '书签', '礼盒包装', '面料']
-CRAFTS = ['数码印花', '丝网印花', '提花织造', '刺绣', '缂丝', '扎染', '手绘']
+"""Scenario templates and style presets. Prefills are drafts, never confirmed facts."""
 STYLES = ['简约', '典雅', '喜庆', '国潮', '清新']
 TEMPLATE_FIELDS = ('audience', 'scene', 'purpose', 'theme')
 TEMPLATES = {

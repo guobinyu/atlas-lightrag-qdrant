@@ -7,36 +7,32 @@ import streamlit as st
 
 from lab import demand_scoring
 from lab.charts import score_breakdown, score_contributions
-from lab.demand_ui import (TOPIC_KINDS, action, candidate_cards, capacity_form, confirmation_view, design_cards,
-                           element_widgets, enterprise_picker, evidence_view, history_view, image_step, inline_questions,
-                           launch, manual_topic_form, round_topics_caption, scoring_form, step_feedback, task_select)
-from lab.demands import (brief_sections, can_answer, current_brief, current_design, export_bundle, export_markdown,
-                         round_markdown, stale, structured_lines, topic_note)
+from lab import flow_ui as flow
+from lab.demand_ui import (TOPIC_KINDS, action, candidate_cards, capacity_form, confirmation_view, enterprise_picker,
+                           evidence_view, inline_questions, launch, manual_topic_form, round_topics_caption, scoring_form,
+                           step_feedback, task_select)
+from lab.demands import can_answer, current_brief, current_design, round_markdown, stale, structured_lines, topic_note
 from lab.enterprises import Enterprises
-from lab.ui_kit import badges, boundary, category_icon
+from lab.flow_ui import NUMBERS, brief_content, current_round, direction_lines, last_op, latest_analysis
+from lab.ui_kit import badges, boundary
 
 STEPS = ['需求与产能', '选题', '候选方向', '方案包', '设计与纹样']
-NUMBERS = '①②③④⑤'
-STATE_LABELS = {'done': '已完成', 'current': '进行中', 'auto': '自动生成中', 'locked': '待完成'}
+PREFIX = 'predict'
 AWAIT = 'predict-await'
-FLASH = 'predict-flash'
-DESIGN_KINDS = ('demand_design_generate', 'demand_design_revise', 'demand_image_generate', 'demand_image_revise')
-IMAGE_MODES = {'pattern': '纹样初稿（可平铺单元）', 'application': '应用效果图', 'none': '仅文字方案'}
+# Changing step i makes results from this point on historical.
+IMPACT = ('rounds', 'rounds', 'selection', 'brief')
 
 
-def last_op(run):
-    ops = list(run['operations'].values())
-    return ops[-1] if ops else None
+def edit_key(run, i):
+    return flow.edit_key(PREFIX, run, i)
 
 
-def latest_analysis(run):
-    return next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
+def flash(message):
+    flow.flash(PREFIX, message)
 
 
-def current_round(run):
-    if run['selection']:
-        return next((b for b in run['candidate_rounds'] if b['id'] == run['selection']['round_id']), None)
-    return next((b for b in reversed(run['candidate_rounds']) if not stale(run, b)), None)
+def impact(run, i):
+    flow.impact(run, IMPACT[i])
 
 
 def flow_state(run, advanced=False):
@@ -50,52 +46,6 @@ def flow_state(run, advanced=False):
     for i in range(1, len(done)):
         done[i] = done[i] and done[i - 1]
     return done, next((i for i, d in enumerate(done) if not d), None), brief, design
-
-
-def flow_bar(states):
-    items = ''.join(f'<li class="flow-step {state}"' + (' aria-current="step"' if state == 'current' else '') + '>'
-                    f'<b>{NUMBERS[i]}</b><span>{STEPS[i]}</span><small>{STATE_LABELS[state]}</small></li>'
-                    for i, state in enumerate(states))
-    st.markdown(f'<ol class="flow-bar" aria-label="研判流程">{items}</ol>', unsafe_allow_html=True)
-
-
-def step_title(i, state, note=''):
-    st.markdown(f'<div class="flow-title {state}"><b>{NUMBERS[i]}</b> {STEPS[i]}'
-                f'<small>{STATE_LABELS[state]}{" · " + escape(note) if note else ""}</small></div>', unsafe_allow_html=True)
-
-
-def edit_key(run, i):
-    return f"predict-edit-{i}-{run['id']}"
-
-
-def toggle(key):
-    st.session_state[key] = not st.session_state.get(key, False)
-
-
-def flash(message):
-    # A toast raised right before st.rerun() is lost, so show it on the next run.
-    st.session_state[FLASH] = message
-
-
-def impact(run, step):
-    """Results that become history when the given step is changed; listed before anything is submitted."""
-    brief = current_brief(run)
-    rounds = [b for b in run['candidate_rounds'] if not stale(run, b)]
-    designs = [v for v in run.get('design_versions', []) if brief and v['brief_id'] == brief['id']]
-    images = [a for a in run.get('image_assets', []) if any(a['design_id'] == v['id'] for v in designs)]
-    items = []
-    if step <= 1 and rounds:
-        items.append(f'{len(rounds)} 轮候选')
-    if step <= 2 and run['selection']:
-        items.append('已选方向')
-    if step <= 3 and brief:
-        items.append(f"方案包（版本 {brief['version']}）")
-    if designs:
-        items.append(f'{len(designs)} 版设计方案' + (f'及 {len(images)} 张图稿' if images else ''))
-    if items:
-        st.warning('提交后以下结果会变为历史版本，仍可在页面底部「版本记录」中查看：' + '、'.join(items))
-    else:
-        st.caption('目前没有后续结果，修改不会影响其他内容。')
 
 
 # ① 需求与产能
@@ -359,52 +309,7 @@ def direction_view(engine, run, busy, editing):
             evidence_view(batch['context']['evidence'])
 
 
-def direction_lines(run):
-    batch = current_round(run)
-    candidate = next((c for c in batch['candidates'] if c['id'] == run['selection']['candidate_id']), None) if batch else None
-    if not candidate:
-        return ['已选方向不可用，请重新选择。']
-    lines = [f"{category_icon(candidate.get('requirements', {}).get('category', candidate['form']))} {candidate['name']}"]
-    if candidate.get('requirements'):
-        req = candidate['requirements']
-        lines.append(req['category'] + (' · ' + '、'.join(req['crafts']) if req['crafts'] else '')
-                     + f" · 爆款潜力 {candidate['potential']['score']}/5（模型判断）")
-    return lines
-
-
 # ④ 方案包
-
-def brief_content(run, brief):
-    sections = brief_sections(run, brief)
-    st.markdown('#### ' + escape(sections[0][0]))
-    st.caption(sections[0][1])
-    for title, body, auxiliary in sections[1:]:
-        if not auxiliary and title in ('推荐产品方案', '产品方案包与需求规格书'):
-            st.markdown('**' + title + '**')
-            st.markdown(body)
-        else:
-            with st.expander(title):
-                st.markdown(body)
-
-
-def brief_more(engine, run, brief, busy, editing):
-    with st.expander('修订方案包与导出', expanded=editing):
-        if editing:
-            impact(run, 3)
-        key = f"predict-brief-{brief['id']}-"
-        with st.form(key + 'revise'):
-            instruction = st.text_area('修订意见', max_chars=4000)
-            changes = element_widgets({k: v for k, v in brief['evidence'].items() if 'element_id' in v}, key, busy)
-            revise = st.form_submit_button('生成方案包新版本', disabled=busy or not engine.workbench.llm.configured)
-        if revise:
-            st.session_state.pop(edit_key(run, 3), None)
-            launch(engine, 'demand_revise', run['id'], brief_id=brief['id'], instruction=instruction, element_changes=changes)
-        a, b = st.columns(2)
-        a.download_button('下载 Markdown', export_markdown(run, brief), file_name=f"package-v{brief['version']}.md", mime='text/markdown', key=key + 'md')
-        b.download_button('下载 JSON', json.dumps(export_bundle(run, brief), ensure_ascii=False, indent=2),
-                          file_name=f"package-v{brief['version']}.json", mime='application/json', key=key + 'json')
-        evidence_view(brief['evidence'])
-
 
 def package_view(engine, run, brief, busy, editing, advance_key=None):
     work = engine.workbench
@@ -422,129 +327,19 @@ def package_view(engine, run, brief, busy, editing, advance_key=None):
     if advance_key and st.button('下一步：设计与纹样', type='primary', icon=':material/arrow_forward:', key=advance_key + '-button'):
         st.session_state[advance_key] = True
         st.rerun()
-    brief_more(engine, run, brief, busy, editing)
-
-
-def package_lines(brief):
-    package = brief['content'].get('package') or {}
-    lines = [f"{brief['content']['title']}（版本 {brief['version']}）"]
-    if package.get('pricing'):
-        lines.append(f"定价参考 {package['pricing']['low']}–{package['pricing']['high']} 元／件 · 风险 {len(package.get('risks', []))} 项")
-    return lines
+    flow.brief_more(engine, run, brief, busy, editing, PREFIX, edit_key(run, 3))
 
 
 # ⑤ 设计与纹样
 
-def generate_options(engine, run, brief, busy, label):
-    work = engine.workbench
-    key = f"predict-design-{run['id']}-{brief['id']}-"
-    with st.expander('生成选项', expanded=False):
-        variants = st.selectbox('一次生成方案数', [1, 3], format_func=lambda n: '1 版' if n == 1 else '3 版对比（仅文字，选定一版后再出图）',
-                                key=key + 'variants', disabled=busy)
-        mode = st.radio('图稿', list(IMAGE_MODES), format_func=IMAGE_MODES.get, key=key + 'mode', horizontal=True,
-                        disabled=busy or variants == 3 or not work.images.configured)
-    if not work.images.configured:
-        st.caption('尚未配置图片服务，本次只生成文字方案。')
-    with_images = work.images.configured and variants == 1 and mode != 'none'
-    if st.button(label, type='primary', icon=':material/auto_awesome:', disabled=busy or not work.llm.configured, key=key + 'generate'):
-        inputs = {'brief_id': brief['id'], 'variants': variants, 'include_images': with_images}
-        if with_images:
-            inputs['image_mode'] = mode
-        launch(engine, 'demand_design_generate', run['id'], **inputs)
-
-
-def design_view(engine, run, brief, design, busy):
-    from lab import demand_design
-    from lab.design_pdf import export_pdf
-    work = engine.workbench
-    op = last_op(run)
-    step_feedback(engine, run['id'], op, ('demand_design_generate', 'demand_design_revise', 'demand_pipeline'), 'flow-design')
-    if op and op['kind'] in ('demand_design_generate', 'demand_design_revise', 'demand_pipeline') and op['status'] == 'running':
-        return
-    if design is None:
-        versions = [v for v in run.get('design_versions', []) if v['brief_id'] == brief['id'] and not stale(run, v)]
-        if versions and versions[-1].get('group_id'):
-            design_cards(engine, run, brief, busy, prefix='predict', heading='选择一版设计方案')
-            st.caption('确认一版后，在这一步继续生成纹样初稿或效果图。')
-        else:
-            st.caption('方案包：' + '；'.join(package_lines(brief)))
-            generate_options(engine, run, brief, busy, '生成设计与纹样' if work.images.configured else '生成设计方案')
-        return
-    content = demand_design.sections(run, design)
-    st.markdown('#### ' + escape(content[0][0]))
-    st.caption(content[0][1])
-    for tab, (_, body, _) in zip(st.tabs(['整体概念', '视觉设计', '产品应用与交付']), content[1:4]):
-        with tab:
-            st.markdown(body)
-    for title, body, _ in content[4:]:
-        with st.expander(title):
-            st.markdown(body)
-    image_step(engine, run, design, True, op)
-    with st.expander('修订、导出与重新生成'):
-        key = f"predict-design-{design['id']}-"
-        with st.form(key + 'revise'):
-            instruction = st.text_area('设计方案修改意见', placeholder='例如：主色改为墨绿，保留故事，简化构图。', max_chars=4000)
-            changes = element_widgets({k: v for k, v in brief['evidence'].items() if 'element_id' in v}, key + 'elements', busy)
-            revise = st.form_submit_button('生成设计方案新版本', disabled=busy or not work.llm.configured)
-        if revise:
-            saved = {a.get('mode', 'application') for a in run.get('image_assets', []) if a['design_id'] == design['id']}
-            launch(engine, 'demand_design_revise', run['id'], design_id=design['id'], instruction=instruction, element_changes=changes,
-                   include_images=work.images.configured, image_mode='pattern' if 'pattern' in saved or not saved else 'application')
-        pdf_run, pdf_design = deepcopy(run), deepcopy(design)
-        a, b, c = st.columns(3)
-        a.download_button('导出 PDF', lambda: export_pdf(work.demands, pdf_run, pdf_design), file_name=f"design-{run['id'][:8]}-v{design['version']}.pdf",
-                          mime='application/pdf', key=key + 'pdf', on_click='ignore')
-        b.download_button('下载 Markdown', demand_design.export_markdown(run, design), file_name=f"design-{run['id'][:8]}-v{design['version']}.md",
-                          mime='text/markdown', key=key + 'md')
-        c.download_button('下载 JSON', json.dumps(demand_design.export_bundle(run, design), ensure_ascii=False, indent=2),
-                          file_name=f"design-{run['id'][:8]}-v{design['version']}.json", mime='application/json', key=key + 'json')
-        st.divider()
-        generate_options(engine, run, brief, busy, '重新生成设计方案')
-
-
 # Page
-
-def version_record(run):
-    from lab import demand_design
-    from lab.campaign_ui import local_time
-    with st.expander('版本记录', icon=':material/history:'):
-        rounds, briefs, designs, log = st.tabs(['候选轮次', '方案包', '设计方案', '执行记录'])
-        with rounds:
-            for batch in reversed(run['candidate_rounds']):
-                st.markdown(f"{local_time(batch['at'])} · {'历史' if stale(run, batch) else '当前'} · "
-                            + '、'.join(escape(c['name']) for c in batch['candidates']))
-                st.download_button('导出', round_markdown(run, batch), file_name=f"candidates-{batch['id'][:8]}.md", mime='text/markdown',
-                                   key='record-round-' + batch['id'])
-            if not run['candidate_rounds']:
-                st.caption('暂无。')
-        with briefs:
-            for brief in reversed(run['briefs']):
-                historical = stale(run, brief) or brief['selection'] != run['selection']
-                st.markdown(f"版本 {brief['version']} · {escape(brief['content']['title'])} · {'历史' if historical else '当前'}")
-                st.download_button('导出', export_markdown(run, brief), file_name=f"package-v{brief['version']}.md", mime='text/markdown',
-                                   key='record-brief-' + brief['id'])
-            if not run['briefs']:
-                st.caption('暂无。')
-        with designs:
-            for design in reversed(run.get('design_versions', [])):
-                historical = stale(run, design) or design['selection'] != run['selection']
-                st.markdown(f"版本 {design['version']} · {escape(design['content']['title'])} · {'历史' if historical else '当前'}")
-                st.download_button('导出', demand_design.export_markdown(run, design), file_name=f"design-v{design['version']}.md",
-                                   mime='text/markdown', key='record-design-' + design['id'])
-            if not run.get('design_versions'):
-                st.caption('暂无。')
-        with log:
-            history_view(run)
-
 
 def predict_page(engine):
     from lab.workbench_ui import header
     work = engine.workbench
     busy = work.active is not None
     header('爆款产品研判工作平台', '按「需求与产能 → 选题 → 候选方向 → 方案包 → 设计与纹样」五步推进，每一步确认后再进入下一步。', 'HOT PRODUCT PREDICTION')
-    message = st.session_state.pop(FLASH, None)
-    if message:
-        st.toast(message, icon=':material/check_circle:')
+    flow.show_flash(PREFIX)
     a, b = st.columns([4, 1], vertical_alignment='bottom')
     with a:
         run = task_select(engine, 'trend', '研判任务')
@@ -573,23 +368,23 @@ def predict_page(engine):
             states.append('auto')
         else:
             states.append('current' if i == current else 'locked')
-    flow_bar(states)
+    flow.flow_bar(STEPS, states, '研判流程')
     requested = st.query_params.get('step')
     topics = work.demands.topics(run)
     summaries = {0: lambda: [run['inputs']['request'], *requirement_lines(run['inputs'])[:2]],
-                 1: lambda: topic_lines(run, topics), 2: lambda: direction_lines(run), 3: lambda: package_lines(brief)}
+                 1: lambda: topic_lines(run, topics), 2: lambda: direction_lines(run), 3: lambda: flow.brief_lines(brief)}
     for i, name in enumerate(STEPS):
         with st.container(border=True, key=f'flow-step-{i}'):
             if states[i] == 'locked':
-                step_title(i, 'locked', f'需先完成第 {NUMBERS[i - 1]} 步')
+                flow.step_title(STEPS, i, 'locked', f'需先完成第 {NUMBERS[i - 1]} 步')
                 continue
             editing = done[i] and st.session_state.get(edit_key(run, i), False)
             expanded = states[i] in ('current', 'auto') or editing or i == 4 or requested == name
             title, edit = st.columns([6, 1], vertical_alignment='center')
             with title:
-                step_title(i, states[i])
+                flow.step_title(STEPS, i, states[i])
             if done[i] and i < 4:
-                edit.button('取消修改' if editing else '修改', key=edit_key(run, i) + '-button', on_click=toggle, args=(edit_key(run, i),),
+                edit.button('取消修改' if editing else '修改', key=edit_key(run, i) + '-button', on_click=flow.toggle, args=(edit_key(run, i),),
                             disabled=busy, width='stretch')
             if not expanded:
                 for line in summaries[i]():
@@ -606,8 +401,8 @@ def predict_page(engine):
             elif i == 3:
                 package_view(engine, run, brief, busy, editing, None if done[3] else advance_key)
             else:
-                design_view(engine, run, brief, design, busy)
-    version_record(run)
+                flow.design_view(engine, run, brief, design, busy, PREFIX)
+    flow.version_record(run)
     boundary(['预测评分由时效、节点临近、能力关联与人工热度按权重合成，不是真实热度或销量预测；权重在第 ② 步「更多」中调整。',
               '爆款潜力为模型判断；产能检查只核对品类、工艺、交期和数量，未设置产能时不过滤。',
               '日历节点与手动热点用于安排上市时间和选题，不能作为事实引用；搜索话题的日期核验不代表热度已验证。',

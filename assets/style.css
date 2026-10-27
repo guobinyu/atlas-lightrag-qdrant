@@ -221,6 +221,10 @@ button p { line-height:1.5!important; }
 [class*="st-key-candidate-"] { background:#fbfcf9; }
 [class*="st-key-home-entry-"] { min-height:190px; }
 [class*="st-key-custom-template-"] { text-align:center; }
+/* Capacity and budget fields: one-line labels so the inputs in a row stay aligned. */
+[class*="capacity-box"] [data-testid="stWidgetLabel"] { white-space:nowrap; overflow:hidden; }
+[class*="capacity-box"] [data-testid="stWidgetLabel"] p { white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+[class*="capacity-box"] [data-testid="stHorizontalBlock"] { align-items:flex-end; }
 /* Hotspot prediction: one-way five-step flow. */
 .flow-bar { display:grid; grid-template-columns:repeat(5,minmax(0,1fr)); gap:8px; list-style:none; padding:0; margin:6px 0 14px; }
 .flow-step { display:flex; flex-direction:column; gap:3px; padding:12px 14px; border:1px solid var(--line); border-radius:12px; background:#fff; color:var(--muted); }

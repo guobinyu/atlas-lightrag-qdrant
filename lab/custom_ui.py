@@ -1,23 +1,41 @@
-"""Custom design workbench (proposal sketch 2): scene templates, chat clarification, designer selections, confirmed proposals."""
+"""Custom design workbench: one-way four steps for specific audiences and scenes. No hotspot search."""
 from html import escape
 
 import streamlit as st
 
+from lab import flow_ui as flow
 from lab.demand_presets import STYLES, TEMPLATES, TEMPLATE_FIELDS
-from lab.demand_ui import (action, brief_step, candidate_cards, capacity_form, confirmation_view, design_cards, design_step,
-                           enterprise_picker, evidence_view, history_view, launch, round_topics_caption, step_feedback,
-                           task_select)
-from lab.demands import FIELDS, MAX_CLARIFICATION_ROUNDS, can_answer, clarification_rounds, stale, structured_lines
-from lab.ui_kit import boundary, panel_title, step_tabs, swatches
+from lab.demand_ui import (action, candidate_cards, capacity_form, confirmation_view, enterprise_picker, evidence_view,
+                           launch, step_feedback, task_select)
+from lab.demands import (FIELDS, MAX_CLARIFICATION_ROUNDS, can_answer, clarification_rounds, current_brief, current_design,
+                         stale, structured_lines)
+from lab.flow_ui import NUMBERS, brief_content, direction_lines, last_op, latest_analysis, running
+from lab.ui_kit import boundary, panel_title, swatches
 
-STEPS = ['需求对话', '方向与元素', '方案确认']
+STEPS = ['需求对话', '产品方向', '文化元素与设计说明', '设计方案']
+PREFIX = 'custom'
+# Changing step i makes results from this point on historical.
+IMPACT = ('rounds', 'selection', 'brief')
 TEMPLATE_ICONS = {'wedding': 'celebration', 'uniform': 'school', 'alumni': 'diversity_3', 'souvenir': 'card_giftcard'}
 
 
-def last_op(run):
-    ops = list(run['operations'].values())
-    return ops[-1] if ops else None
+def edit_key(run, i):
+    return flow.edit_key(PREFIX, run, i)
 
+
+def custom_state(run, advanced=False):
+    """(done flags, index of the current step or None, current brief, current design). Pure; used by tests.
+    advanced: the user moved past the design brief; any design for the current brief counts as well."""
+    brief = current_brief(run)
+    design = current_design(run, brief)
+    designed = bool(brief) and any(v['brief_id'] == brief['id'] for v in run.get('design_versions', []))
+    done = [run['approved_revision'] == run['revision'], bool(run['selection']), bool(brief) and (advanced or designed), bool(design)]
+    for i in range(1, len(done)):
+        done[i] = done[i] and done[i - 1]
+    return done, next((i for i, d in enumerate(done) if not d), None), brief, design
+
+
+# ① 需求对话
 
 def pick_template(key):
     current = st.session_state.get('custom-template')
@@ -68,9 +86,12 @@ def merchant_panel(engine, run, busy):
     key = f'custom-new-{profile_id}-'
     merchant = {'industry': st.text_input('行业（必填）', fields.get('industry', ''), max_chars=4000, key=key + 'industry', disabled=busy),
                 'capabilities': st.text_area('生产能力（必填）', fields.get('capabilities', ''), max_chars=4000, key=key + 'capabilities', disabled=busy, height=90)}
-    with st.expander('品牌、限制、产能与预算（选填）'):
+    with st.expander('品牌、限制、产能、预算与使用日期（选填）'):
         merchant['brand'] = st.text_input('品牌名称', fields.get('brand', ''), max_chars=4000, key=key + 'brand', disabled=busy)
         merchant['constraints'] = st.text_area('已知限制', fields.get('constraints', ''), max_chars=4000, key=key + 'constraints', disabled=busy)
+        picked = st.date_input('使用日期', value=None, key=key + 'use-date', disabled=busy,
+                               help='如婚期、校庆日或交付日期，用于倒排生产与设计交付。')
+        merchant['use_date'] = picked.isoformat() if picked else ''
         merchant['capacity'], merchant['budget'] = capacity_form({'capacity': fields.get('capacity', {})}, key, busy, wrap=False)
     return merchant
 
@@ -136,7 +157,7 @@ def chat_panel(engine, run, merchant, busy):
             for role, text in transcript(run):
                 with st.chat_message(role):
                     st.write(text)
-            analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
+            analysis = latest_analysis(run)
             if not busy and can_answer(run, analysis):
                 ok, session = action(engine, service.clarification_session, run['id'], analysis['id'])
                 session = session if ok else None
@@ -159,7 +180,7 @@ def chat_panel(engine, run, merchant, busy):
                         answer(engine, run, session, index, choice, text, unknown)
             elif run['approved_revision'] == run['revision']:
                 with st.chat_message('assistant'):
-                    st.write('需求已确认。请到「方向与元素」生成产品方向并选择文化元素与配色。')
+                    st.write('需求已确认。下一步：生成产品方向。')
             elif analysis and not busy:
                 with st.chat_message('assistant'):
                     st.write('请检查右侧的需求结构化预览，采用合适的建议后确认需求；也可以继续补充说明。')
@@ -177,7 +198,7 @@ def chat_panel(engine, run, merchant, busy):
             supplement(engine, run, message.strip())
 
 
-def preview_panel(engine, run, busy):
+def preview_panel(engine, run, busy, editing=False):
     panel_title('需求结构化预览')
     if run is None:
         template = st.session_state.get('custom-template')
@@ -189,28 +210,83 @@ def preview_panel(engine, run, busy):
     rows = [{'项目': FIELDS[k], '内容': inputs.get(k) or '未提供'} for k in TEMPLATE_FIELDS]
     rows += [{'项目': line.split('：', 1)[0], '内容': line.split('：', 1)[1]} for line in structured_lines(inputs)]
     st.table(rows)
-    if run['approved_revision'] == run['revision']:
-        st.success('需求已确认，可以进入「方向与元素」。')
+    if run['approved_revision'] == run['revision'] and not editing:
+        st.success('需求已确认。')
         return
     if busy:
         st.caption('任务执行中，完成后可确认需求。')
         return
-    analysis = next((c for c in reversed(run['clarifications']) if c['revision'] == run['revision']), None)
-    confirmation_view(engine, run, analysis, inline=True)
+    confirmation_view(engine, run, latest_analysis(run), inline=True, auto_search=False)
 
+
+def need_step(engine, run, busy, editing=False):
+    if editing:
+        flow.impact(run, IMPACT[0], '设计说明')
+    left, middle, right = st.columns([1, 1.35, 1.1], gap='medium')
+    with left, st.container(border=True, key='custom-templates'):
+        template_panel(engine, run, busy)
+        merchant = merchant_panel(engine, run, busy)
+    with middle, st.container(border=True, key='custom-chat'):
+        chat_panel(engine, run, merchant, busy)
+    with right, st.container(border=True, key='custom-preview'):
+        preview_panel(engine, run, busy, editing)
+
+
+def need_lines(run):
+    inputs = run['inputs']
+    return [inputs['request'], *(f"{FIELDS[k]}：{inputs[k]}" for k in TEMPLATE_FIELDS if inputs.get(k)), *structured_lines(inputs)]
+
+
+# ② 产品方向
+
+def picked(run):
+    st.session_state.pop(edit_key(run, 1), None)
+    flow.flash(PREFIX, '已选定方向。下一步：选择文化元素并生成设计说明。')
+
+
+def direction_step(engine, run, busy, editing):
+    work = engine.workbench
+    batch = next((b for b in reversed(run['candidate_rounds']) if not stale(run, b)), None)
+    step_feedback(engine, run['id'], last_op(run), ('demand_candidates',), 'custom-candidates')
+    if running(run, ('demand_candidates',)):
+        return
+    if editing:
+        flow.impact(run, IMPACT[1], '设计说明')
+    if batch is None:
+        st.caption('依据已确认的人群、场景、用途与文化主题，结合场景模板和文化知识库生成产品方向；不使用热点搜索。')
+        if st.button('生成产品方向', type='primary', icon=':material/auto_awesome:', disabled=busy or not work.llm.configured,
+                     key=f"custom-generate-{run['id']}"):
+            launch(engine, 'demand_candidates', run['id'], count=3)
+    else:
+        candidate_cards(engine, run, batch, busy, after_select=lambda: picked(run))
+        if batch.get('capacity_log'):
+            with st.expander(f"产能检查记录 · {len(batch['capacity_log'])} 个方向已自动修正"):
+                for item in batch['capacity_log']:
+                    st.write(item['name'] + '：' + '；'.join(item['problems']))
+    with st.expander('更多：按数量和意见重新生成、参考资料'):
+        key = f"custom-regen-{run['id']}-"
+        with st.form(key + 'form'):
+            a, b = st.columns([1, 3], vertical_alignment='bottom')
+            count = a.selectbox('方向数量', [3, 5], key=key + 'count')
+            instruction = b.text_input('调整意见（选填）', max_chars=4000, key=key + 'instruction')
+            regen = st.form_submit_button('重新生成产品方向', disabled=busy or not work.llm.configured)
+        if regen:
+            launch(engine, 'demand_candidates', run['id'], count=count, instruction=instruction)
+        if batch:
+            evidence_view(batch['context']['evidence'])
+
+
+# ③ 文化元素与设计说明
 
 def designer_panel(engine, run, busy):
     service = engine.workbench.demands
-    panel_title('设计师选择面板')
-    if not run['selection']:
-        st.caption('先在左侧选定一个产品方向。')
-        return
     batch = next(r for r in run['candidate_rounds'] if r['id'] == run['selection']['round_id'])
     elements = {k: v for k, v in batch['context']['evidence'].items() if 'element_id' in v}
     picks = run.get('element_picks') if (run.get('element_picks') or {}).get('selection') == run['selection'] else {}
     key = f"custom-pick-{run['id']}-{run['selection']['round_id']}-{run['selection']['candidate_id']}-"
     motifs = {k: v for k, v in elements.items() if v['type'] != 'palette'}
     palettes = {k: v for k, v in elements.items() if v['type'] == 'palette'}
+    panel_title('设计师选择面板')
     st.markdown('**文化元素选择**')
     chosen = []
     if motifs:
@@ -221,70 +297,60 @@ def designer_panel(engine, run, busy):
     st.markdown('**配色方案**')
     chosen_palettes = []
     if palettes:
-        for ref, item in palettes.items():
+        for item in palettes.values():
             st.markdown(f"{escape(item['label'])}：" + swatches(item['colors']), unsafe_allow_html=True)
         chosen_palettes = st.pills('配色方案', list(palettes), selection_mode='multi', default=[k for k in picks.get('adopt', []) if k in palettes],
                                    format_func=lambda k: palettes[k]['label'], key=key + 'palettes', label_visibility='collapsed', disabled=busy) or []
     else:
         st.caption('本轮没有匹配的配色素材，设计说明会给出建议配色。')
     style = st.pills('风格', STYLES, default=picks.get('style') or None, key=key + 'style', disabled=busy)
-    note = st.text_input('保存说明', picks.get('note', ''), max_chars=1000, key=key + 'note', disabled=busy)
+    note = st.text_input('补充说明（选填）', picks.get('note', ''), max_chars=1000, key=key + 'note', disabled=busy)
     adopt = [*chosen, *chosen_palettes]
-    a, b = st.columns(2)
-    if a.button('保存需求', key=key + 'save', disabled=busy, width='stretch'):
-        ok, _ = action(engine, service.save_picks, run['id'], {'adopt': adopt, 'style': style or '', 'note': note})
-        if ok:
-            st.toast('已保存设计选择。')
-    if b.button('生成设计说明', key=key + 'brief', type='primary', width='stretch',
-                disabled=busy or not engine.workbench.llm.configured or run['approved_revision'] != run['revision']):
-        launch(engine, 'demand_brief', run['id'], element_changes={'adopt': adopt, 'style': style or ''}, instruction=note)
     st.caption('选中的素材会要求在设计说明中标注引用编号；设计解读类素材只作创意依据。')
-    step_feedback(engine, run['id'], last_op(run), ('demand_brief',), 'custom-brief')
+    a, b = st.columns([1, 2])
+    if a.button('保存选择', key=key + 'save', disabled=busy, width='stretch', help='只保存当前选择，不调用模型。'):
+        if action(engine, service.save_picks, run['id'], {'adopt': adopt, 'style': style or '', 'note': note})[0]:
+            st.toast('已保存设计选择。')
+    if b.button('生成设计说明', key=key + 'brief', type='primary', icon=':material/description:', width='stretch',
+                disabled=busy or not engine.workbench.llm.configured):
+        st.session_state.pop(edit_key(run, 2), None)
+        launch(engine, 'demand_brief', run['id'], element_changes={'adopt': adopt, 'style': style or ''}, instruction=note)
 
 
-def directions_step(engine, run, busy):
-    service = engine.workbench.demands
-    approved = run['approved_revision'] == run['revision']
-    left, right = st.columns([1.4, 1], gap='medium')
-    with left, st.container(border=True, key='custom-directions'):
-        panel_title('产品方向')
-        if not approved:
-            st.caption('请先在「需求对话」中确认需求。')
-        with st.form(f"custom-generate-{run['id']}"):
-            a, b = st.columns([1, 3], vertical_alignment='bottom')
-            count = a.selectbox('方向数量', [3, 5])
-            instruction = b.text_input('调整意见（选填）', max_chars=4000)
-            generate = st.form_submit_button('生成产品方向', type='primary', disabled=busy or not engine.workbench.llm.configured or not approved)
-        if generate:
-            launch(engine, 'demand_candidates', run['id'], count=count, instruction=instruction)
-        step_feedback(engine, run['id'], last_op(run), ('demand_candidates',), 'custom-candidates')
-        if run['candidate_rounds']:
-            from lab.campaign_ui import local_time
-            batches = {b['id']: b for b in reversed(run['candidate_rounds'])}
-            bid = st.selectbox('方向轮次', list(batches), key=f"custom-round-{run['id']}-{len(batches)}",
-                               format_func=lambda k: f"{local_time(batches[k]['at'])} · {k[:6]}" + (' · 历史条件' if stale(run, batches[k]) else ''))
-            batch = batches[bid]
-            round_topics_caption(batch)
-            candidate_cards(engine, run, batch, busy)
-            with st.expander('本轮参考资料'):
-                evidence_view(batch['context']['evidence'])
-    with right, st.container(border=True, key='custom-designer'):
+def pick_lines(run):
+    picks = run.get('element_picks') or {}
+    if picks.get('selection') != run['selection'] or not (picks.get('adopt') or picks.get('style')):
+        return []
+    return [f"已选素材 {len(picks.get('adopt', []))} 项" + (f" · 风格：{picks['style']}" if picks.get('style') else '')]
+
+
+def element_step(engine, run, brief, busy, editing, advance_key):
+    step_feedback(engine, run['id'], last_op(run), ('demand_brief', 'demand_revise'), 'custom-brief')
+    if running(run, ('demand_brief', 'demand_revise')):
+        return
+    if brief is None:
+        st.caption('已选方向：' + '；'.join(direction_lines(run)))
         designer_panel(engine, run, busy)
+        return
+    brief_content(run, brief)
+    if advance_key and st.button('下一步：设计方案', type='primary', icon=':material/arrow_forward:', key=advance_key + '-button'):
+        st.session_state[advance_key] = True
+        st.rerun()
+    with st.expander('重新选择文化元素并生成新的设计说明', expanded=editing):
+        if editing:
+            flow.impact(run, IMPACT[2], '设计说明')
+        designer_panel(engine, run, busy)
+    flow.brief_more(engine, run, brief, busy, False, PREFIX, edit_key(run, 2), '设计说明')
 
 
-def confirm_step(engine, run):
-    busy = engine.workbench.active is not None
-    prefix = f"demand-{run['id']}-r{run['revision']}-"
-    brief = brief_step(engine, run, prefix, last_op(run), heading='设计说明', generate=False)
-    design_cards(engine, run, brief, busy)
-    design_step(engine, run, brief, last_op(run), heading='方案生成与修订', default_variants=3)
-
+# Page
 
 def custom_page(engine):
     from lab.workbench_ui import header
     work = engine.workbench
     busy = work.active is not None
-    header('特色个性化产品定制工作台', '面向婚礼、校服、校友纪念品、文旅伴手礼等场景，通过多轮对话拆解需求，选择文化元素与配色，生成多版设计方案供设计师确认。', 'CUSTOM DESIGN')
+    header('特色个性化产品定制工作台', '按「需求对话 → 产品方向 → 文化元素与设计说明 → 设计方案」四步推进，面向婚礼、校服、校友纪念品、文旅伴手礼等场景。', 'CUSTOM DESIGN')
+    flow.show_flash(PREFIX)
     if st.query_params.get('demand'):
         st.session_state['custom-new'] = False
     has_runs = any(r['inputs']['path'] == 'custom' for r in work.demands.runs())
@@ -293,7 +359,7 @@ def custom_page(engine):
     run = None
     with a:
         if new:
-            st.markdown('**新建定制任务**：在下方对话中发送第一条需求即可创建。')
+            st.markdown('**新建定制任务**：选好场景模板、填写企业信息，在对话框发送第一条需求即可创建。')
         else:
             run = task_select(engine, 'custom', '定制任务')
     if new and has_runs:
@@ -304,29 +370,51 @@ def custom_page(engine):
         st.session_state['custom-new'] = True
         st.query_params.pop('demand', None)
         st.rerun()
-    dialogue, directions, confirm = step_tabs(STEPS, 'custom-steps')
-    with dialogue:
-        left, middle, right = st.columns([1, 1.35, 1.1], gap='medium')
-        with left, st.container(border=True, key='custom-templates'):
-            template_panel(engine, run, busy)
-            merchant = merchant_panel(engine, run, busy)
-        with middle, st.container(border=True, key='custom-chat'):
-            chat_panel(engine, run, merchant, busy)
-        with right, st.container(border=True, key='custom-preview'):
-            preview_panel(engine, run, busy)
-    with directions:
-        if run:
-            directions_step(engine, run, busy)
-        else:
-            st.caption('创建任务并确认需求后，在这里生成产品方向。')
-    with confirm:
-        if run:
-            confirm_step(engine, run)
-        else:
-            st.caption('生成设计说明后，在这里比较并确认设计方案。')
-    if run:
-        with st.expander('需求与执行历史'):
-            history_view(run)
-    boundary(['模板预填和模型整理的人群、场景、用途只是草稿，确认后才成为需求条件。',
+    if not work.llm.configured:
+        st.info('对话分析和生成前，请在「系统 → 模型、企业与日历设置」中配置文字模型。')
+    if run is None:
+        flow.flow_bar(STEPS, ['current', 'locked', 'locked', 'locked'], '定制流程')
+        with st.container(border=True, key='flow-step-0'):
+            flow.step_title(STEPS, 0, 'current', '发送第一条需求即可创建任务')
+            need_step(engine, None, busy)
+        for i in range(1, len(STEPS)):
+            with st.container(border=True, key=f'flow-step-{i}'):
+                flow.step_title(STEPS, i, 'locked', f'需先完成第 {NUMBERS[i - 1]} 步')
+        return
+    brief = current_brief(run)
+    advance_key = f"custom-advance-{brief['id']}" if brief else None
+    done, current, brief, design = custom_state(run, bool(advance_key and st.session_state.get(advance_key)))
+    states = ['done' if done[i] else 'current' if i == current else 'locked' for i in range(len(STEPS))]
+    flow.flow_bar(STEPS, states, '定制流程')
+    requested = st.query_params.get('step')
+    summaries = {0: lambda: need_lines(run), 1: lambda: direction_lines(run), 2: lambda: [*flow.brief_lines(brief), *pick_lines(run)]}
+    for i, name in enumerate(STEPS):
+        with st.container(border=True, key=f'flow-step-{i}'):
+            if states[i] == 'locked':
+                flow.step_title(STEPS, i, 'locked', f'需先完成第 {NUMBERS[i - 1]} 步')
+                continue
+            editing = done[i] and st.session_state.get(edit_key(run, i), False)
+            expanded = states[i] == 'current' or editing or i == 3 or requested == name
+            title, edit = st.columns([6, 1], vertical_alignment='center')
+            with title:
+                flow.step_title(STEPS, i, states[i])
+            if done[i] and i < 3:
+                edit.button('取消修改' if editing else '修改', key=edit_key(run, i) + '-button', on_click=flow.toggle, args=(edit_key(run, i),),
+                            disabled=busy, width='stretch')
+            if not expanded:
+                for line in summaries[i]():
+                    st.caption(line)
+                continue
+            if i == 0:
+                need_step(engine, run, busy, editing)
+            elif i == 1:
+                direction_step(engine, run, busy, editing)
+            elif i == 2:
+                element_step(engine, run, brief, busy, editing, None if done[2] else advance_key)
+            else:
+                flow.design_view(engine, run, brief, design, busy, PREFIX, default_variants=3)
+    flow.version_record(run, '设计说明')
+    boundary(['定制设计不使用热点搜索，依据为需求对话、场景模板、企业产能和文化知识库。',
+              '模板预填和模型整理的人群、场景、用途只是草稿，确认后才成为需求条件。',
               '文化元素与配色来自知识库：「资料记载」可引用原文，「设计解读」只作创意依据；HEX 色值不代表印刷定色。',
               '三版设计方案只生成文字，确认一版后再生成图稿；生成内容需设计师复核，不承诺生产可行性。'])

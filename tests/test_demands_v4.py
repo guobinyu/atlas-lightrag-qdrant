@@ -256,7 +256,7 @@ def test_ui_template_capacity_topics_and_variants(v4):
     app.text_area(key='demand-new-request').input('婚礼回礼丝巾')
     app.text_input(key='demand-new-industry').input('丝绸')
     app.text_area(key='demand-new-capabilities').input('真丝丝巾')
-    app.multiselect(key='demand-new-cap-categories').set_value(['丝巾'])
+    app.text_input(key='demand-new-cap-categories').input('丝巾，丝巾')
     app.number_input(key='demand-new-cap-lead').set_value(20)
     app.number_input(key='demand-new-budget-max').set_value(200.0)
     button(app, '保存新任务').click().run()

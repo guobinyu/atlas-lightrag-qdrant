@@ -74,10 +74,11 @@ CANDIDATE_V4 = CANDIDATE_V3 + '''每个候选另需提供 "requirements":{"categ
 summary.inputs.capacity 是商家产能：categories 为可生产品类，crafts 为可用工艺，lead_days 为常规交期天数，monthly 为月产能，moq 为起订量。已提供 categories 时 category 必须从中选择；所需工艺不在 crafts 中时必须同时写入 capability_gaps；quantity 不能超过 monthly 在可用周期内的产量，也不能低于 moq；可用周期不能短于常规交期。summary.inputs.budget 中 price_min、price_max 为预算单价（元），quantity 为数量。
 topic.kind 为 calendar 时是未来的节日或消费节点，用来安排上市时间；为 manual 时是用户手动提供的热点；两者都未验证热度。topic_score 是程序按用户权重计算的预测评分，不是真实热度。potential 是你的判断，不得写成销量预测或爆款承诺。
 template_focus 存在时按其中的场景关注点设计候选，并在 assumptions 说明仍需商家确认的部分。round_to_fix、candidates_to_fix 和 capacity_violations 存在时，round_to_fix 是上一版完整候选，其中部分方向违反产能约束：修正或替换这些方向，其余方向尽量保留，数量不变。
+summary.inputs.use_date 是使用或交付日期（如婚期、校庆日），用来倒排生产与设计交付，不是热点。
 topics 是用户选择的 1–3 个话题（topic 为其中第一个），可以组合成一个方向，也可以分别对应不同候选；topic_scores 是各话题的预测评分，不是热度。
 '''
 BRIEF_V4 = BRIEF_V3 + '''另需提供产品方案包 "package"：{"positioning":"产品定位","audience":"目标人群","story":"文化故事摘要","materials":"面料与工艺建议","patterns":[{"direction":"纹样方向","element_ref":"可选，M 开头素材"}],"ip":[{"name":"IP 名称","usage":"使用方式","rights":"授权情况或待确认事项","element_ref":"可选"}],"pricing":{"low":数字,"high":数字,"basis":"定价依据"},"risks":[{"item":"风险","level":"高、中或低","response":"应对措施"}],"specs":[{"item":"规格项目","value":"建议值","status":"确认、建议或待定"}]}。
-pricing 是参考单价（元），需要报价验证；用户提供 budget 单价时，区间必须与预算单价区间有重叠。specs 只有用户明确确认的条件可标为确认，其余标为建议或待定。risks 至少一项，选市场、生产、授权、交期中真正相关的风险。没有可用 IP 或授权不明时 ip 可为空数组，不得编造授权。patterns 至少一项。
+summary.inputs.use_date 存在时，在 specs 和 risks 中说明按该日期倒排的打样、生产与交付节点。pricing 是参考单价（元），需要报价验证；用户提供 budget 单价时，区间必须与预算单价区间有重叠。specs 只有用户明确确认的条件可标为确认，其余标为建议或待定。risks 至少一项，选市场、生产、授权、交期中真正相关的风险。没有可用 IP 或授权不明时 ip 可为空数组，不得编造授权。patterns 至少一项。
 '''
 TEMPLATE_RULE = 'template_focus 是用户选择的场景模板关注点，只用于判断需要澄清什么和给出建议，不是用户已确认的条件。'
 
@@ -154,7 +155,13 @@ def clean_structured(value):
     template = value.get('template') or ''
     if template not in ('', *TEMPLATES):
         raise ValueError('场景模板无效。')
-    return {k: v for k, v in (('capacity', cap), ('budget', bud), ('template', template)) if v}
+    use_date = value.get('use_date') or ''
+    if use_date:
+        try:
+            use_date = date.fromisoformat(str(use_date)).isoformat()
+        except ValueError:
+            raise ValueError('使用日期格式无效。') from None
+    return {k: v for k, v in (('capacity', cap), ('budget', bud), ('template', template), ('use_date', use_date)) if v}
 
 
 def structured_lines(inputs):
@@ -172,6 +179,12 @@ def structured_lines(inputs):
         lines.append(f"预算单价（元）：{bud.get('price_min', '未定')}–{bud.get('price_max', '未定')}")
     if bud.get('quantity'):
         lines.append(f"预算数量（件）：{bud['quantity']}")
+    if inputs.get('use_date'):
+        days = (date.fromisoformat(inputs['use_date']) - current_day()).days
+        line = f"使用日期：{inputs['use_date']}（" + (f'距今 {days} 天' if days >= 0 else '已过') + '）'
+        if cap.get('lead_days') and days < cap['lead_days']:
+            line += f"，短于常规交期 {cap['lead_days']} 天，交期不足"
+        lines.append(line)
     return lines
 
 
@@ -912,6 +925,8 @@ class DemandService:
             raise ValueError('请先按当前需求继续。')
         if kind == 'demand_candidates' and run['inputs']['path'] == 'trend' and not run['topic_id']:
             raise ValueError('请先选择话题。')
+        if kind == 'demand_search' and run['inputs']['path'] == 'custom':
+            raise ValueError('定制设计不使用热点搜索，依据为需求对话、场景模板与文化知识库。')
         if kind in ('demand_brief', 'demand_revise', 'demand_pipeline') and not run['selection']:
             raise ValueError('请先选择一个当前产品候选。')
         count = inputs.get('count', 3)
@@ -1050,7 +1065,7 @@ class DemandService:
             if not v['queries'] or any(not 2 <= len(q.strip()) <= 300 for q in v['queries']):
                 raise ValueError('需要 1–3 个有效检索词。')
         self.checkpoint(run, op, job, '规划近期话题检索')
-        queries = await self.ask(run, op, 'queries', 'DEMAND_SEARCH：结合商家能力、需求和时间范围，生成最多三个近期热点检索词。人群／场景定制须围绕已确认的目标人群、使用场景、核心用途与文化主题检索，不得用热点替换这些条件。返回 {"queries":["检索词"]}。',
+        queries = await self.ask(run, op, 'queries', 'DEMAND_SEARCH：结合商家能力、需求和时间范围，生成最多三个近期热点检索词。返回 {"queries":["检索词"]}。',
                                  {'summary': op['input_snapshot'], 'as_of': research['at']}, check_queries)
         self.checkpoint(run, op, job, '搜集话题正文')
         for query in dict.fromkeys(queries['queries']):
@@ -1127,16 +1142,9 @@ class DemandService:
         if 'context' in op['cache']:
             return op['cache']['context']
         evidence, topics = {}, []
-        if run['inputs']['path'] == 'custom' and not run['topic_id']:
-            if not run['research_id']:
-                await self.discover(run, op, job)
-            research = next(r for r in run['research'] if r['id'] == run['research_id'])
-            # Custom exploration may use the first suggested topic unless the user selects one.
-            run['topic_id'] = research['topics'][0]['id']
-            run['topic_ids'] = [run['topic_id']]
-            op['binding'] = binding(run)
-            self.save(run)
-        for topic_id in selected_topic_ids(run):
+        custom = run['inputs']['path'] == 'custom'
+        # Custom tasks rely on the conversation, scene template and culture library; topics are not used.
+        for topic_id in [] if custom else selected_topic_ids(run):
             topic = deepcopy(find_topic(run, topic_id))
             if topic is None:
                 raise ValueError('所选话题不存在，请重新选择。')

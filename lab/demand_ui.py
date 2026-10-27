@@ -1,12 +1,15 @@
 """A staged product exploration UI; ordinary editing never calls the model."""
 import json
 from copy import deepcopy
+from datetime import date
 from html import escape
 import streamlit as st
 
 from lab.demands import MAX_CLARIFICATION_ROUNDS, clarification_rounds, can_answer, clean_inputs, adoption_value, FIELDS, BRIEF_FIELDS, stale, export_bundle, export_markdown, brief_sections, candidate_comparison, mapping_markdown, structured_lines, topic_note, current_day, capacity_status, brief_topics, brief_topic_scores
 from lab.ui_kit import badges, category_icon, swatches as kit_swatches
-from lab.demand_presets import CATEGORIES, CRAFTS, STYLES, TEMPLATES, TEMPLATE_FIELDS
+import re
+
+from lab.demand_presets import STYLES, TEMPLATES, TEMPLATE_FIELDS
 from lab import demand_scoring
 from lab.campaign_ui import local_time
 
@@ -31,7 +34,8 @@ def launch(engine, kind, identifier, **inputs):
         st.rerun()
 
 
-def input_form(values, prefix, disabled=False):
+def input_form(values, prefix, disabled=False, path=None):
+    """path fixes the task's workbench: the path and hotspot range fields are then hidden, so a task never switches workbench."""
     result = {}
     result['request'] = st.text_area('原始需求', value=values.get('request', ''), key=prefix + 'request', max_chars=4000, disabled=disabled)
     a, b = st.columns(2)
@@ -39,11 +43,14 @@ def input_form(values, prefix, disabled=False):
     result['brand'] = b.text_input('品牌名称（选填）', value=values.get('brand', ''), key=prefix + 'brand', max_chars=4000, disabled=disabled)
     result['capabilities'] = st.text_area('生产能力（必填）', value=values.get('capabilities', ''), placeholder='例如：可生产真丝丝巾和家居服，支持数码印花。', key=prefix + 'capabilities', max_chars=4000, disabled=disabled)
     result['constraints'] = st.text_area('已知限制（选填）', value=values.get('constraints', ''), placeholder='材料、工艺、价格范围和不能做的产品。', key=prefix + 'constraints', max_chars=4000, disabled=disabled)
-    a, b = st.columns(2)
-    result['path'] = a.selectbox('探索路径', list(PATHS), index=list(PATHS).index(values.get('path', 'trend')), format_func=PATHS.get, key=prefix + 'path', disabled=disabled)
-    result['days'] = b.selectbox('热点搜索时间范围', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
+    if path is None:
+        a, b = st.columns(2)
+        result['path'] = a.selectbox('探索路径', list(PATHS), index=list(PATHS).index(values.get('path', 'trend')), format_func=PATHS.get, key=prefix + 'path', disabled=disabled)
+        result['days'] = b.selectbox('热点搜索时间范围', [1, 7, 30], index=[1, 7, 30].index(values.get('days', 7)), format_func=lambda n: '最近 24 小时' if n == 1 else f'最近 {n} 天', key=prefix + 'days', disabled=disabled)
+    else:
+        result['path'], result['days'] = path, values.get('days', 7)
     templates = ['', *TEMPLATES]
-    result['template'] = st.selectbox('场景模板（选填）', templates, index=templates.index(values.get('template', '')),
+    result['template'] = values.get('template', '') if result['path'] == 'trend' and path else st.selectbox('场景模板（选填）', templates, index=templates.index(values.get('template', '')),
         format_func=lambda k: TEMPLATES[k]['label'] if k else '不使用模板', key=prefix + 'template', disabled=disabled,
         on_change=apply_template, args=(prefix,), help='选择后切换到人群／场景定制，并预填尚未填写的人群、场景、用途和主题草稿；模板关注点会提供给澄清和候选生成。')
     custom_columns = st.columns(2) if result['path'] == 'custom' else None
@@ -51,7 +58,13 @@ def input_form(values, prefix, disabled=False):
         result[key] = (custom_columns[i % 2].text_input(FIELDS[key], value=values.get(key, ''), key=prefix + key, max_chars=4000, disabled=disabled)
                        if result['path'] == 'custom' else values.get(key, ''))
     if result['path'] == 'custom':
+        current = values.get('use_date')
+        picked = st.date_input('使用日期（选填）', value=date.fromisoformat(current) if current else None, key=prefix + 'use-date',
+                               disabled=disabled, help='如婚期、校庆日或交付日期，用于倒排生产与设计交付。')
+        result['use_date'] = picked.isoformat() if picked else ''
         st.caption('定制路径至少填写目标人群、使用场景或文化主题中的一项。品牌未填写时保留为“未提供”。')
+    else:
+        result['use_date'] = values.get('use_date', '')
     if result['template']:
         st.caption('模板关注点：' + TEMPLATES[result['template']]['focus'])
     result['capacity'], result['budget'] = capacity_form(values, prefix, disabled)
@@ -69,27 +82,39 @@ def apply_template(prefix):
             st.session_state[prefix + field] = TEMPLATES[template][field]
 
 
+def split_items(text):
+    """Comma, 顿号, semicolon or line separated items; duplicates dropped, order kept."""
+    return list(dict.fromkeys(x.strip() for x in re.split(r'[,，、;；\n]+', text or '') if x.strip()))
+
+
 def capacity_form(values, prefix, disabled, wrap=True, budget=True):
+    """Categories and crafts are typed by the merchant, so any industry fits; labels stay short enough for one line."""
     cap, bud = values.get('capacity') or {}, values.get('budget') or {}
     with st.expander('产能与预算（选填）', expanded=bool(cap or bud)) if wrap else st.container():
-        st.caption('填写后，产品候选按可生产品类、工艺和产能做硬性检查，需求单的定价参考需与预算单价有重叠。0 表示未填写；品类和工艺可输入列表外的项目。')
-        a, b = st.columns(2)
-        categories = a.multiselect('可生产品类', list(dict.fromkeys([*CATEGORIES, *cap.get('categories', [])])), default=cap.get('categories', []),
-                                   key=prefix + 'cap-categories', disabled=disabled, accept_new_options=True)
-        crafts = b.multiselect('可用工艺', list(dict.fromkeys([*CRAFTS, *cap.get('crafts', [])])), default=cap.get('crafts', []),
-                               key=prefix + 'cap-crafts', disabled=disabled, accept_new_options=True)
-        c, d, e = st.columns(3)
-        lead = c.number_input('常规交期（天）', 0, 365, cap.get('lead_days', 0), key=prefix + 'cap-lead', disabled=disabled)
-        monthly = d.number_input('月产能（件）', 0, 10_000_000, cap.get('monthly', 0), step=100, key=prefix + 'cap-monthly', disabled=disabled)
-        moq = e.number_input('起订量（件）', 0, 10_000_000, cap.get('moq', 0), step=50, key=prefix + 'cap-moq', disabled=disabled)
-        if not budget:
-            return ({'categories': categories, 'crafts': crafts, 'lead_days': int(lead), 'monthly': int(monthly), 'moq': int(moq)}, {})
-        f, g, h = st.columns(3)
-        low = f.number_input('预算单价下限（元）', 0.0, 1_000_000.0, float(bud.get('price_min', 0)), step=10.0, key=prefix + 'budget-min', disabled=disabled)
-        high = g.number_input('预算单价上限（元）', 0.0, 1_000_000.0, float(bud.get('price_max', 0)), step=10.0, key=prefix + 'budget-max', disabled=disabled)
-        quantity = h.number_input('预算数量（件）', 0, 10_000_000, bud.get('quantity', 0), step=50, key=prefix + 'budget-quantity', disabled=disabled)
-    return ({'categories': categories, 'crafts': crafts, 'lead_days': int(lead), 'monthly': int(monthly), 'moq': int(moq)},
-            {'price_min': low, 'price_max': high, 'quantity': int(quantity)})
+        with st.container(key=prefix + 'capacity-box'):
+            st.caption('填写后，产品候选按可生产品类、工艺和产能做硬性检查，需求单的定价参考需与预算单价有重叠。数字填 0 表示不限。')
+            a, b = st.columns(2)
+            categories = a.text_input('可生产品类', '、'.join(cap.get('categories', [])), max_chars=600, key=prefix + 'cap-categories',
+                                      placeholder='多项用顿号或逗号分隔', disabled=disabled,
+                                      help='填写企业能生产的产品品类，例如：瓶装黄酒、礼盒装、定制酒标。候选方向的品类必须在其中。')
+            crafts = b.text_input('可用工艺', '、'.join(cap.get('crafts', [])), max_chars=600, key=prefix + 'cap-crafts',
+                                  placeholder='多项用顿号或逗号分隔', disabled=disabled,
+                                  help='填写企业已具备的工艺，例如：手工冬酿、陶坛陈酿、丝网印刷。候选需要的其他工艺会标为需新增能力。')
+            c, d, e = st.columns(3)
+            lead = c.number_input('交期（天）', 0, 365, cap.get('lead_days', 0), key=prefix + 'cap-lead', disabled=disabled, help='常规生产交期。')
+            monthly = d.number_input('月产能（件）', 0, 10_000_000, cap.get('monthly', 0), step=100, key=prefix + 'cap-monthly', disabled=disabled)
+            moq = e.number_input('起订量（件）', 0, 10_000_000, cap.get('moq', 0), step=50, key=prefix + 'cap-moq', disabled=disabled)
+            capacity = {'categories': split_items(categories), 'crafts': split_items(crafts), 'lead_days': int(lead), 'monthly': int(monthly), 'moq': int(moq)}
+            if not budget:
+                return capacity, {}
+            f, g, h = st.columns(3)
+            low = f.number_input('最低单价（元）', 0.0, 1_000_000.0, float(bud.get('price_min', 0)), step=10.0, key=prefix + 'budget-min',
+                                 disabled=disabled, help='预算单价下限，元／件。')
+            high = g.number_input('最高单价（元）', 0.0, 1_000_000.0, float(bud.get('price_max', 0)), step=10.0, key=prefix + 'budget-max',
+                                  disabled=disabled, help='预算单价上限，元／件。')
+            quantity = h.number_input('数量（件）', 0, 10_000_000, bud.get('quantity', 0), step=50, key=prefix + 'budget-quantity',
+                                      disabled=disabled, help='预算对应的采购数量。')
+    return capacity, {'price_min': low, 'price_max': high, 'quantity': int(quantity)}
 
 
 def element_widgets(refs, key, disabled):
@@ -593,10 +618,10 @@ def confirmation_view(engine, run, analysis, inline=False, auto_search=True):
             st.write(question + '：' + answer)
     if inline:
         with st.expander('编辑需求摘要'):
-            values = input_form(run['inputs'], prefix)
+            values = input_form(run['inputs'], prefix, path=run['inputs']['path'])
     else:
         st.write('可编辑需求摘要')
-        values = input_form(run['inputs'], prefix)
+        values = input_form(run['inputs'], prefix, path=run['inputs']['path'])
     # These widgets are deliberately outside a form: edits must invalidate old
     # recommendations before another recommendation can be adopted.
     if clean_inputs(values) != draft['expected']:

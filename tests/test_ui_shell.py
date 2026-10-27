@@ -144,38 +144,6 @@ def test_custom_chat_creates_task_answers_and_confirms(demand):
     assert run['approved_revision'] == run['revision']
 
 
-def test_custom_designer_picks_brief_and_three_variants(demand):
-    demand.llm = V4Model(demand.llm)
-    culture(demand)
-    run = demand.demands.create(INPUT)
-    demand.demands.approve(run['id'])
-    run, _ = start(demand, run, 'candidates')
-    round_id = run['candidate_rounds'][0]['id']
-    demand.demands.select_candidate(run['id'], round_id, 'C1')
-    app = shell(demand, view='custom', demand=run['id'], step='方向与元素')
-    assert not app.exception
-    key = f"custom-pick-{run['id']}-{round_id}-C1-"
-    app.pills(key=key + 'motifs').set_value(['M1']).run()
-    button(app, '保存需求').click().run()
-    assert demand.demands.load(run['id'])['element_picks']['adopt'] == ['M1']
-    demand.llm.refs['brief'] = 'M1'
-    button(app, '生成设计说明').click().run()
-    wait(demand)
-    run = demand.demands.load(run['id'])
-    assert run['briefs'][0]['content']['story_mapping'][0]['element_ref'] == 'M1'
-    app = shell(demand, view='custom', demand=run['id'], step='方案确认')
-    assert not app.exception
-    assert app.selectbox(key=f"demand-design-variants-{run['id']}").value == 3
-    button(app, '生成设计方案').click().run()
-    wait(demand)
-    app.run()
-    assert not app.exception
-    run = demand.demands.load(run['id'])
-    assert [v['variant'] for v in run['design_versions']] == [1, 2, 3]
-    app.button(key='custom-choose-' + run['design_versions'][1]['id']).click().run()
-    assert demand.demands.load(run['id'])['design_choice'] == run['design_versions'][1]['id']
-
-
 def test_pattern_page_empty_state_and_enterprise_settings(demand):
     app = shell(demand, view='pattern')
     assert not app.exception
