@@ -25,10 +25,14 @@ EVENTS.update({'culture.chunk.started': '文化解码文本块开始', 'culture.
 
 def navigation(engine):
     """Top navigation replaces the old sidebar list. ?view= stays the route so old links keep working."""
-    from lab.ui_kit import top_nav, workbench_for
+    from lab.ui_kit import page_enabled, top_nav, workbench_for
     route = st.query_params.get("view", "home")
     if route not in PAGES:
         route = "home"
+    if not page_enabled(engine, route):
+        # A direct link to a disabled page lands on the home page with a short note.
+        st.session_state["nav-soon"] = route if route in PAGES else None
+        st.query_params["view"] = route = "home"
     if route == "demand":
         # The combined page split into two workbenches; send the link to the task's own workbench.
         identifier = st.query_params.get("demand")
@@ -127,7 +131,9 @@ def job_panel(engine):
             if job.get('requested') is not None and job.get('collected', 0) < job['requested']:
                 st.warning('可读取资料不足目标数量，未用重复资料补足。')
             st.write(f"素材 {result['elements']} · 关系 {result['relations']} · 未完成文本块 {result['failed_blocks']} · 未入库提示 {result['issues']}")
-            st.link_button('查看文化知识库', '/?view=culture')
+            from lab.ui_kit import page_enabled
+            if page_enabled(engine, 'culture'):
+                st.link_button('查看文化知识库', '/?view=culture')
         if job.get("result"):
             result = job["result"]
             st.success(f"当前知识库：{result['entities']} 个实体 · {result['relations']} 条关系 · {sum(result['vectors'].values())} 个向量")

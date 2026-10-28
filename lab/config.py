@@ -25,6 +25,8 @@ class Settings:
     sample_limit: int = 2000
     timeout: float = 60.0
     working_dir: Path | None = None
+    # Pages shown as "coming soon" for a focused demo, e.g. ("culture",). Background features keep working.
+    disabled_pages: tuple = ()
 
     @property
     def rag_dir(self) -> Path:
@@ -42,6 +44,8 @@ class Settings:
             raise ValueError("QDRANT_MODE 必须为 local 或 server。")
         if self.embedding_provider not in {"fastembed", "http"}:
             raise ValueError("EMBEDDING_PROVIDER 必须为 fastembed 或 http。")
+        if any(not re.fullmatch(r"[a-z_]{1,32}", page) for page in self.disabled_pages):
+            raise ValueError("DISABLED_PAGES 只能填写页面标识，多个用逗号分隔，例如 culture。")
         if not 1 <= self.embedding_dim <= 65536 or not 1 <= self.sample_limit <= 2000:
             raise ValueError("向量维度或背景样本数量不合法。")
         from urllib.parse import urlsplit
@@ -90,4 +94,5 @@ def load_settings() -> Settings:
         sample_limit=int(get("SAMPLE_LIMIT", "2000")),
         timeout=float(get("REQUEST_TIMEOUT", "60")),
         working_dir=Path(values["LIGHTRAG_WORKING_DIR"]).expanduser().resolve() if values.get("LIGHTRAG_WORKING_DIR") else None,
+        disabled_pages=tuple(p.strip() for p in (get("DISABLED_PAGES", "") or "").split(",") if p.strip()),
     ).validate()

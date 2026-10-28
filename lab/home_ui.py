@@ -5,7 +5,7 @@ import streamlit as st
 
 from lab.campaign_ui import local_time
 from lab.demands import current_day
-from lab.ui_kit import NAV, go, workbench_for
+from lab.ui_kit import NAV, go, page_enabled, workbench_for
 
 ENTRIES = [('predict', '结合节日节点、热点与企业产能，研判并推荐细分产品方向。', '个研判任务'),
            ('custom', '面向婚礼、校服、校友纪念品等场景，对话式拆解需求并形成设计说明。', '个定制任务'),
@@ -37,8 +37,12 @@ def home_page(engine):
             label, icon = NAV[view]
             st.markdown(f'**:material/{icon}: {label}**')
             st.caption(copy)
-            st.caption(f'{counts[view]} {unit}')
-            st.button('进入' + label, key='home-go-' + view, on_click=go, args=(view,), width='stretch')
+            if page_enabled(engine, view):
+                st.caption(f'{counts[view]} {unit}')
+                st.button('进入' + label, key='home-go-' + view, on_click=go, args=(view,), width='stretch')
+            else:
+                st.caption('即将上线')
+                st.button('即将上线', key='home-go-' + view, icon=':material/lock:', disabled=True, width='stretch')
     recent, upcoming, status = st.columns([1.5, 1, 1])
     with recent, st.container(border=True, key='home-recent'):
         st.markdown('**最近任务**')

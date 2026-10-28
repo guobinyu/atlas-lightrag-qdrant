@@ -10,7 +10,7 @@ from lab.demand_ui import (action, candidate_cards, capacity_form, confirmation_
 from lab.demands import (FIELDS, MAX_CLARIFICATION_ROUNDS, can_answer, clarification_rounds, current_brief, current_design,
                          stale, structured_lines)
 from lab.flow_ui import NUMBERS, brief_content, direction_lines, last_op, latest_analysis, running
-from lab.ui_kit import boundary, panel_title, swatches
+from lab.ui_kit import boundary, page_enabled, panel_title, swatches
 
 STEPS = ['需求对话', '产品方向', '文化元素与设计说明', '设计方案']
 PREFIX = 'custom'
@@ -343,7 +343,8 @@ def designer_panel(engine, run, busy):
         chosen = st.pills('文化元素', list(motifs), selection_mode='multi', default=[k for k in picks.get('adopt', []) if k in motifs],
                           format_func=lambda k: motifs[k]['label'], key=key + 'motifs', label_visibility='collapsed', disabled=busy) or []
     else:
-        st.caption('本轮没有匹配的纹样或文化元素，可在知识库解码相关资料后重新生成方向。')
+        st.caption('本轮没有匹配的纹样或文化元素，可在知识库解码相关资料后重新生成方向。' if page_enabled(engine, 'culture')
+                   else '本轮没有匹配的纹样或文化元素，设计说明会按需求给出图案与配色建议。')
     st.markdown('**配色方案**')
     chosen_palettes = []
     if palettes:

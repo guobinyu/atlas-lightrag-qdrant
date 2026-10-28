@@ -20,6 +20,13 @@ ICONS = [(('礼盒', '包装', '礼品', '套装'), 'redeem'), (('校服', '校�
          (('团扇', '扇'), 'air'), (('面料', '布料'), 'texture')]
 
 
+SOON = '{} 即将上线，本次演示暂未开放。'
+
+
+def page_enabled(engine, view):
+    return view not in getattr(engine.settings, 'disabled_pages', ())
+
+
 def go(view, **params):
     """Use as an on_click callback; outside callbacks call st.rerun() afterwards."""
     st.query_params.clear()
@@ -34,16 +41,27 @@ def top_nav(engine, route):
 
     def changed():
         choice = st.session_state['top-nav']
-        if choice is None:
+        if choice is None or not page_enabled(engine, choice):
+            # Stay on the current page; a disabled page only explains itself.
             st.session_state['top-nav'] = route if route in NAV else None
+            if choice is not None:
+                st.session_state['nav-soon'] = choice
             return
         go(choice)
         st.session_state['top-nav-url'] = choice
 
+    soon = st.session_state.pop('nav-soon', None)
+    if soon:
+        st.toast(SOON.format(NAV[soon][0] if soon in NAV else SYSTEM.get(soon, soon)), icon=':material/lock:')
+
+    def label(key):
+        name, icon = NAV[key]
+        return f':material/lock: {name}' if not page_enabled(engine, key) else f':material/{icon}: {name}'
+
     with st.container(key='top-bar'):
         brand, nav, system = st.columns([1.35, 5, 0.75], vertical_alignment='center')
         brand.markdown(f'<div class="top-brand">{BRAND}</div>', unsafe_allow_html=True)
-        nav.segmented_control('主导航', list(NAV), format_func=lambda k: f':material/{NAV[k][1]}: {NAV[k][0]}',
+        nav.segmented_control('主导航', list(NAV), format_func=label,
                               key='top-nav', on_change=changed, label_visibility='collapsed')
         with system.popover('系统', icon=':material/settings:', width='stretch'):
             for key, label in SYSTEM.items():

@@ -808,7 +808,9 @@ def demand_page(engine):
         if batch['context']['knowledge_missing']:
             st.info('未检索到相关本地知识。产品方向为策划建议，不代表获得专业知识库支持。')
         if batch['context'].get('culture_missing') is True:
-            st.info('文化知识库中没有匹配的纹样或配色素材，可在「文化知识库」解码相关资料后重新生成。')
+            from lab.ui_kit import page_enabled
+            st.info('文化知识库中没有匹配的纹样或配色素材，可在「文化知识库」解码相关资料后重新生成。' if page_enabled(engine, 'culture')
+                    else '文化知识库中没有匹配的纹样或配色素材，产品方向按需求给出创意建议。')
         if batch.get('format_version', 1) >= 4:
             if not batch['context']['summary']['inputs'].get('capacity'):
                 st.caption('未设置产能参数，本轮没有做产能硬性检查。')
